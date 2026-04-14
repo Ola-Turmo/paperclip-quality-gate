@@ -155,7 +155,12 @@ export interface IssueUpdatedEvent {
 export interface CommentCreatedEvent {
   payload: {
     issue?: { id?: string };
-    comment?: { body?: string; authorName?: string };
+    comment?: {
+      id?: string;
+      body?: string;
+      authorUserId?: string | null;
+      authorAgentId?: string | null;
+    };
   };
   companyId?: string;
 }

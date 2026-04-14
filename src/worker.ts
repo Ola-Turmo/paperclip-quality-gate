@@ -34,7 +34,12 @@ interface IssuePayload {
 
 interface CommentPayload {
   issue?: { id?: string };
-  comment?: { body?: string; authorName?: string };
+  comment?: {
+    id?: string;
+    body?: string;
+    authorUserId?: string | null;
+    authorAgentId?: string | null;
+  };
 }
 
 interface AgentRunFinishedPayload {
@@ -379,7 +384,7 @@ const plugin = definePlugin({
         let companyId = "";
         try {
           const issue = await ctx.issues.get(issueId, "");
-          if (issue) companyId = (issue as unknown as { companyId?: string }).companyId ?? "";
+          if (issue) companyId = issue.companyId ?? "";
         } catch {
           // fallback: use empty string
         }
@@ -399,7 +404,7 @@ const plugin = definePlugin({
 
         if (companyId) {
           try {
-            await ctx.issues.update(issueId, { status: "in_review" }, companyId);
+            await ctx.issues.update(issueId, { status: "blocked" }, companyId);
           } catch (err) {
             ctx.logger.warn("submit_for_review: failed to update issue status", { error: String(err) });
           }
@@ -519,20 +524,31 @@ const plugin = definePlugin({
       "agent.run.finished" as const,
       async (rawEvent: PluginEvent) => {
         const event = rawEvent as AgentRunFinishedEvent;
-        const runId = event.payload?.runId;
-        const companyId = event.payload?.companyId ?? event.companyId ?? "";
+        const runId = (rawEvent as unknown as { payload?: { runId?: string } }).payload?.runId
+          ?? (rawEvent as unknown as { runId?: string }).runId;
+        const companyId = rawEvent.companyId ?? "";
         ctx.logger.info("agent.run.finished event", { runId, companyId });
 
-        if (!runId) {
-          ctx.logger.warn("agent.run.finished: no runId in payload, skipping");
+        if (!runId || !companyId) {
+          ctx.logger.warn("agent.run.finished: missing runId or companyId, skipping");
           return;
         }
 
-        // Try to find the issue associated with this run
-        // The event may carry issueId directly, or we may need to look it up
-        let issueId = event.payload?.issueId ?? event.entityId;
+        // Look up the issue by executionRunId or checkoutRunId
+        let issueId: string | undefined;
+        try {
+          const issues = await ctx.issues.list({ companyId, limit: 50 });
+          const matched = issues.find(
+            (issue) =>
+              issue.executionRunId === runId || issue.checkoutRunId === runId,
+          );
+          issueId = matched?.id;
+        } catch (err) {
+          ctx.logger.warn("agent.run.finished: failed to list issues", { error: String(err) });
+        }
+
         if (!issueId) {
-          ctx.logger.info("agent.run.finished: no issueId in event payload, skipping auto-gate");
+          ctx.logger.info("agent.run.finished: no issue found for this runId, skipping auto-gate");
           return;
         }
 
@@ -664,23 +680,24 @@ const plugin = definePlugin({
     // Event: issue.comment_created
     // -------------------------------------------------------------------------
     ctx.events.on(
-      "issue.comment_added" as PluginEventType,
+      "issue.comment.created" as PluginEventType,
       async (event: PluginEvent<unknown>) => {
         const payload = event.payload as CommentPayload | undefined;
         const issueId = payload?.issue?.id;
         const commentBody = payload?.comment?.body;
         if (!issueId || !commentBody) return;
-        ctx.logger.info("issue.comment_created event", {
+        ctx.logger.info("issue.comment.created event", {
           issueId,
           commentLength: commentBody.length,
         });
 
         const review = await getReview(ctx, issueId);
         if (review) {
+          const authorName = payload?.comment?.authorUserId ?? payload?.comment?.authorAgentId ?? "User";
           const updated = updateReviewStatus(review, review.status, {
             action: "comment added",
             reviewer: "user",
-            reviewerName: payload?.comment?.authorName ?? "User",
+            reviewerName: String(authorName),
             comment: commentBody.slice(0, 500),
           });
           await putReview(ctx, updated);
