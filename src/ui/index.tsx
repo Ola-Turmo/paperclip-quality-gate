@@ -7,6 +7,7 @@ import {
 } from "@paperclipai/plugin-sdk/ui";
 import type {
   DeliverableReview,
+  QualityCheck,
   ReviewActionLog,
   ReviewStatus,
 } from "../types";
@@ -41,59 +42,63 @@ interface RejectParams {
 }
 
 // =============================================================================
-// Utility
+// Constants
 // =============================================================================
 
-function getStatusColor(status: ReviewStatus): string {
+function getStatusMeta(status: ReviewStatus): {
+  label: string;
+  color: string;
+  bg: string;
+  icon: string;
+} {
   switch (status) {
-    case "approved": return "#22c55e";
-    case "rejected": return "#dc2626";
-    case "pending_review": return "#f59e0b";
-    default: return "#6b7280";
+    case "approved":
+      return { label: "Approved", color: "#166534", bg: "#dcfce7", icon: "✅" };
+    case "rejected":
+      return { label: "Rejected", color: "#991b1b", bg: "#fef2f2", icon: "❌" };
+    case "pending_review":
+      return { label: "In Review", color: "#92400e", bg: "#fef3c7", icon: "⏳" };
+    default:
+      return { label: status, color: "#374151", bg: "#f3f4f6", icon: "—" };
   }
 }
 
 function formatTimestamp(ts: string): string {
-  return new Date(ts).toLocaleString();
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // =============================================================================
-// Sub-components
+// Score display
 // =============================================================================
 
-function StatusBadge({ status }: { status: ReviewStatus }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "3px 10px",
-        borderRadius: "9999px",
-        fontSize: "12px",
-        fontWeight: "bold",
-        backgroundColor: getStatusColor(status),
-        color: "white",
-      }}
-    >
-      {status.replace("_", " ").toUpperCase()}
-    </span>
-  );
-}
-
-function ScoreBar({ score }: { score?: number }) {
-  if (score === undefined) return null;
+function ScoreBar({ score, label }: { score: number; label: string }) {
   const pct = score * 10;
-  const color = score >= 7 ? "#22c55e" : score >= 4 ? "#f59e0b" : "#dc2626";
+  const color = score >= 7 ? "#22c55e" : score >= 5 ? "#f59e0b" : "#dc2626";
   return (
-    <div style={{ marginTop: "6px" }}>
-      <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "4px" }}>
-        Quality Score: <strong>{score}/10</strong>
+    <div style={{ marginBottom: "8px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: "12px",
+          color: "#6b7280",
+          marginBottom: "3px",
+        }}
+      >
+        <span>{label}</span>
+        <strong style={{ color }}>{score}/10</strong>
       </div>
       <div
         style={{
-          height: "6px",
+          height: "5px",
           borderRadius: "3px",
           backgroundColor: "#e5e7eb",
-          width: "100%",
           overflow: "hidden",
         }}
       >
@@ -111,43 +116,167 @@ function ScoreBar({ score }: { score?: number }) {
   );
 }
 
+function CategoryChecks({ checks }: { checks: QualityCheck[] }) {
+  if (!checks || checks.length === 0) return null;
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      {checks.map((check) => (
+        <div
+          key={check.category}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "8px",
+            marginBottom: "6px",
+            fontSize: "12px",
+          }}
+        >
+          <span
+            style={{
+              color: check.passed ? "#22c55e" : "#dc2626",
+              flexShrink: 0,
+              marginTop: "1px",
+            }}
+          >
+            {check.passed ? "✅" : "❌"}
+          </span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: "600", color: "#374151", textTransform: "capitalize" }}>
+              {check.category.replace("_", " ")}
+            </span>
+            <span style={{ color: "#6b7280", marginLeft: "6px" }}>
+              {check.score}/10
+            </span>
+            {check.message && (
+              <div style={{ color: "#9ca3af", fontSize: "11px", marginTop: "1px" }}>
+                {check.message}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// Action log
+// =============================================================================
+
 function ActionLogEntry({ entry }: { entry: ReviewActionLog }) {
   return (
     <div
       style={{
-        padding: "8px 0",
+        padding: "10px 0",
         borderBottom: "1px solid #f3f4f6",
         fontSize: "13px",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ fontWeight: "600" }}>{entry.action}</span>
-        <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+        }}
+      >
+        <div style={{ fontWeight: "600", color: "#111827" }}>{entry.action}</div>
+        <div
+          style={{
+            fontSize: "11px",
+            color: "#9ca3af",
+            marginLeft: "8px",
+            flexShrink: 0,
+          }}
+        >
           {formatTimestamp(entry.timestamp)}
-        </span>
+        </div>
       </div>
       <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>
-        by <strong>{entry.reviewerName}</strong> ({entry.reviewer})
+        by <strong>{entry.reviewerName}</strong>
+        {entry.auto && (
+          <span
+            style={{
+              marginLeft: "6px",
+              padding: "1px 6px",
+              backgroundColor: "#f3f4f6",
+              borderRadius: "10px",
+              fontSize: "10px",
+            }}
+          >
+            AUTO
+          </span>
+        )}
       </div>
       {entry.comment && (
         <div
           style={{
-            marginTop: "4px",
-            padding: "6px 8px",
+            marginTop: "6px",
+            padding: "6px 10px",
             backgroundColor: "#f9fafb",
-            borderRadius: "4px",
+            borderRadius: "6px",
             fontSize: "12px",
             color: "#374151",
+            borderLeft: "3px solid #d1d5db",
           }}
         >
           {entry.comment}
         </div>
       )}
       {entry.qualityScore !== undefined && (
-        <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>
-          Score: {entry.qualityScore}/10
+        <div style={{ marginTop: "4px" }}>
+          <ScoreBar score={entry.qualityScore} label="Quality Score" />
         </div>
       )}
+    </div>
+  );
+}
+
+// =============================================================================
+// Loading skeleton
+// =============================================================================
+
+function Skeleton() {
+  return (
+    <div style={{ padding: "16px" }}>
+      {[80, 60, 90, 70, 50].map((w, i) => (
+        <div
+          key={i}
+          style={{
+            height: "14px",
+            width: `${w}%`,
+            backgroundColor: "#e5e7eb",
+            borderRadius: "7px",
+            marginBottom: "10px",
+            animation: "pulse 1.5s infinite",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// Toast feedback
+// =============================================================================
+
+function Toast({ message, type }: { message: string; type: "success" | "error" }) {
+  const colors =
+    type === "success"
+      ? { bg: "#dcfce7", border: "#86efac", text: "#166534" }
+      : { bg: "#fef2f2", border: "#fca5a5", text: "#991b1b" };
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        backgroundColor: colors.bg,
+        border: `1px solid ${colors.border}`,
+        borderRadius: "8px",
+        fontSize: "13px",
+        color: colors.text,
+        marginBottom: "12px",
+      }}
+    >
+      {message}
     </div>
   );
 }
@@ -156,110 +285,124 @@ function ActionLogEntry({ entry }: { entry: ReviewActionLog }) {
 // Main Tab Component
 // =============================================================================
 
-export function QualityGateTab({
-  context,
-}: PluginDetailTabProps) {
+export function QualityGateTab({ context }: PluginDetailTabProps) {
   const issueId = context.entityId;
 
-  const { data, loading, error, refresh } =
-    usePluginData<ReviewStatusData>("review_status", {
-      issueId,
-    });
+  const {
+    data: statusData,
+    loading: statusLoading,
+    error: statusError,
+    refresh: refreshStatus,
+  } = usePluginData<ReviewStatusData>("review_status", { issueId });
 
-  const { data: historyData } =
-    usePluginData<ReviewHistoryData>("review_history", {
-      issueId,
-    });
+  const { data: historyData } = usePluginData<ReviewHistoryData>(
+    "review_history",
+    { issueId },
+  );
 
   const submitAction = usePluginAction("submit_for_review");
   const approveAction = usePluginAction("approve_deliverable");
   const rejectAction = usePluginAction("reject_deliverable");
 
-  // Real-time updates
-  usePluginStream<{ issueId: string; review: DeliverableReview }>(
-    "review_updated",
-  );
+  // Subscribe to real-time review updates
+  usePluginStream<{ issueId: string; review: DeliverableReview }>("review_updated");
 
-  const review = data?.review ?? null;
+  const review = statusData?.review ?? null;
   const actionLog = historyData?.actions ?? [];
 
+  // Form state
   const [summary, setSummary] = React.useState("");
   const [score, setScore] = React.useState(7);
   const [blockApproval, setBlockApproval] = React.useState(false);
   const [comment, setComment] = React.useState("");
   const [rejectReason, setRejectReason] = React.useState("");
-  const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [activeSection, setActiveSection] = React.useState<"submit" | "review" | "history">("review");
 
-  function showFeedback(msg: string) {
-    setFeedback(msg);
-    setTimeout(() => setFeedback(null), 3000);
+  function showToast(msg: string, type: "success" | "error" = "success") {
+    setToast({ message: msg, type });
+    setTimeout(() => setToast(null), 3500);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await (submitAction as (params: SubmitForReviewParams) => Promise<unknown>)({
+      await (submitAction as (p: SubmitForReviewParams) => Promise<unknown>)({
         issue_id: issueId,
         summary,
         quality_score: score,
         block_approval: blockApproval,
       });
-      refresh();
+      refreshStatus();
       setSummary("");
       setBlockApproval(false);
-      showFeedback("Submitted for review.");
+      showToast("Submitted for review.");
     } catch (err) {
-      showFeedback(`Error: ${(err as Error).message}`);
+      showToast(`Error: ${(err as Error).message}`, "error");
     }
   }
 
   async function handleApprove() {
     try {
-      await (approveAction as (params: ApproveParams) => Promise<unknown>)({
+      await (approveAction as (p: ApproveParams) => Promise<unknown>)({
         issue_id: issueId,
         comment,
       });
-      refresh();
+      refreshStatus();
       setComment("");
-      showFeedback("Deliverable approved.");
+      showToast("Deliverable approved.");
     } catch (err) {
-      showFeedback(`Error: ${(err as Error).message}`);
+      showToast(`Error: ${(err as Error).message}`, "error");
     }
   }
 
   async function handleReject(e: React.FormEvent) {
     e.preventDefault();
     if (!rejectReason.trim()) {
-      showFeedback("A rejection reason is required.");
+      showToast("A rejection reason is required.", "error");
       return;
     }
     try {
-      await (rejectAction as (params: RejectParams) => Promise<unknown>)({
+      await (rejectAction as (p: RejectParams) => Promise<unknown>)({
         issue_id: issueId,
         comment: rejectReason,
       });
-      refresh();
+      refreshStatus();
       setRejectReason("");
-      showFeedback("Deliverable rejected.");
+      showToast("Changes requested — issue returned to agent.");
     } catch (err) {
-      showFeedback(`Error: ${(err as Error).message}`);
+      showToast(`Error: ${(err as Error).message}`, "error");
     }
   }
 
-  if (loading) {
-    return <div style={{ padding: "16px", color: "#6b7280" }}>Loading…</div>;
-  }
+  if (statusLoading) return <Skeleton />;
 
-  if (error) {
+  if (statusError) {
     return (
-      <div style={{ padding: "16px", color: "#dc2626" }}>
-        Error: {error.message}
+      <div style={{ padding: "16px", color: "#dc2626", fontSize: "13px" }}>
+        Failed to load: {statusError.message}
       </div>
     );
   }
 
+  const statusMeta = review ? getStatusMeta(review.status) : null;
+
   return (
-    <div style={{ padding: "16px", maxWidth: "640px", fontFamily: "system-ui, sans-serif" }}>
+    <div
+      style={{
+        padding: "16px",
+        maxWidth: "680px",
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+      }}
+    >
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
+
       {/* Header */}
       <div
         style={{
@@ -267,91 +410,210 @@ export function QualityGateTab({
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "16px",
+          paddingBottom: "12px",
+          borderBottom: "1px solid #e5e7eb",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>
-          Quality Gate
-        </h2>
-        {review && <StatusBadge status={review.status} />}
-      </div>
-
-      {/* Feedback toast */}
-      {feedback && (
-        <div
+        <h2
           style={{
-            padding: "8px 12px",
-            backgroundColor: "#dcfce7",
-            border: "1px solid #86efac",
-            borderRadius: "6px",
-            marginBottom: "12px",
-            fontSize: "13px",
-            color: "#166534",
+            margin: 0,
+            fontSize: "15px",
+            fontWeight: "700",
+            color: "#111827",
           }}
         >
-          {feedback}
+          Quality Gate
+        </h2>
+        {statusMeta && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              fontSize: "12px",
+              fontWeight: "700",
+              backgroundColor: statusMeta.bg,
+              color: statusMeta.color,
+            }}
+          >
+            {statusMeta.icon} {statusMeta.label}
+          </span>
+        )}
+      </div>
+
+      {/* Toast */}
+      {toast && <Toast message={toast.message} type={toast.type} />}
+
+      {/* No review yet */}
+      {!review && (
+        <div
+          style={{
+            padding: "24px",
+            textAlign: "center",
+            backgroundColor: "#f9fafb",
+            borderRadius: "10px",
+            border: "1px dashed #d1d5db",
+            marginBottom: "16px",
+          }}
+        >
+          <div style={{ fontSize: "32px", marginBottom: "8px" }}>🚦</div>
+          <div
+            style={{ fontWeight: "600", color: "#374151", marginBottom: "4px" }}
+          >
+            No deliverable submitted yet
+          </div>
+          <div style={{ fontSize: "13px", color: "#6b7280" }}>
+            Submit a deliverable below to begin the quality review process.
+          </div>
         </div>
       )}
 
-      {/* Review summary */}
+      {/* Review summary — shown when review exists */}
       {review && (
         <div
           style={{
-            padding: "12px",
+            padding: "14px",
             backgroundColor: "#f9fafb",
-            borderRadius: "8px",
+            borderRadius: "10px",
             marginBottom: "16px",
             fontSize: "13px",
+            border: "1px solid #e5e7eb",
           }}
         >
-          <div style={{ marginBottom: "4px" }}>
-            <strong>Submitted:</strong> {formatTimestamp(review.submittedAt)}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginBottom: "8px",
+            }}
+          >
+            <div>
+              <span style={{ color: "#6b7280", fontSize: "12px" }}>
+                Submitted{" "}
+              </span>
+              <span style={{ fontWeight: "600", color: "#374151" }}>
+                {formatTimestamp(review.submittedAt)}
+              </span>
+            </div>
+            {review.qualityScore !== undefined && (
+              <div
+                style={{
+                  fontWeight: "700",
+                  fontSize: "20px",
+                  color:
+                    review.qualityScore >= 7
+                      ? "#22c55e"
+                      : review.qualityScore >= 5
+                      ? "#f59e0b"
+                      : "#dc2626",
+                }}
+              >
+                {review.qualityScore}
+                <span style={{ fontSize: "12px", color: "#9ca3af" }}>/10</span>
+              </div>
+            )}
           </div>
+
           {review.deliverableSummary && (
-            <div style={{ marginBottom: "4px" }}>
-              <strong>Summary:</strong> {review.deliverableSummary}
+            <div
+              style={{
+                color: "#374151",
+                marginBottom: "8px",
+                lineHeight: "1.5",
+              }}
+            >
+              {review.deliverableSummary}
             </div>
           )}
-          <ScoreBar score={review.qualityScore} />
+
+          {/* Per-category score breakdown */}
+          {review.qualityChecks && review.qualityChecks.length > 0 && (
+            <CategoryChecks checks={review.qualityChecks} />
+          )}
+
           {review.blockApproval && (
             <div
               style={{
-                marginTop: "6px",
-                padding: "4px 8px",
+                padding: "6px 10px",
                 backgroundColor: "#fef3c7",
-                borderRadius: "4px",
+                borderRadius: "6px",
                 fontSize: "12px",
                 color: "#92400e",
+                fontWeight: "600",
               }}
             >
-              ⚠ Agent flagged a known limitation
+              ⚠️ Agent flagged a known limitation — review required
+            </div>
+          )}
+
+          {review.evaluationSummary && (
+            <div
+              style={{
+                marginTop: "8px",
+                fontSize: "12px",
+                color: "#6b7280",
+                fontStyle: "italic",
+              }}
+            >
+              {review.evaluationSummary}
             </div>
           )}
         </div>
       )}
 
-      {/* Submit form — always visible for pending */}
-      {(!review || review.status === "pending_review") && (
-        <form onSubmit={handleSubmit} style={{ marginBottom: "16px" }}>
-          <div style={{ marginBottom: "10px" }}>
-            <label
-              style={{ display: "block", fontSize: "12px", fontWeight: "600", marginBottom: "4px" }}
+      {/* Tabs: Submit / Review / History */}
+      {review && (
+        <div
+          style={{
+            display: "flex",
+            gap: "4px",
+            marginBottom: "12px",
+            borderBottom: "1px solid #e5e7eb",
+          }}
+        >
+          {(["submit", "review", "history"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveSection(tab)}
+              style={{
+                padding: "6px 14px",
+                border: "none",
+                background: "none",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer",
+                borderBottom:
+                  activeSection === tab
+                    ? "2px solid #3b82f6"
+                    : "2px solid transparent",
+                color:
+                  activeSection === tab ? "#3b82f6" : "#6b7280",
+                transition: "all 0.15s",
+              }}
             >
-              Deliverable Summary
-            </label>
+              {tab === "submit"
+                ? "Resubmit"
+                : tab === "review"
+                ? "Review"
+                : "History"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ---- Submit / Resubmit section ---- */}
+      {(!review || review.status === "pending_review" || activeSection === "submit") && (
+        <form onSubmit={handleSubmit} style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "12px" }}>
+            <label style={labelStyle}>Deliverable Summary</label>
             <textarea
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              placeholder="Describe what was delivered…"
+              placeholder="Describe what was delivered — changes made, files modified, decisions taken…"
               rows={3}
-              style={{
-                width: "100%",
-                padding: "8px",
-                borderRadius: "6px",
-                border: "1px solid #d1d5db",
-                fontSize: "13px",
-                resize: "vertical",
-                boxSizing: "border-box",
-              }}
+              style={{ ...inputStyle, resize: "vertical" }}
             />
           </div>
 
@@ -359,164 +621,185 @@ export function QualityGateTab({
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              gap: "10px",
-              marginBottom: "10px",
+              gap: "12px",
+              marginBottom: "12px",
             }}
           >
             <div>
-              <label
-                style={{ display: "block", fontSize: "12px", fontWeight: "600", marginBottom: "4px" }}
-              >
-                Quality Score (0–10)
-              </label>
+              <label style={labelStyle}>Quality Score (0–10)</label>
               <input
                 type="number"
                 min={0}
                 max={10}
+                step={0.5}
                 value={score}
                 onChange={(e) => setScore(Number(e.target.value))}
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  borderRadius: "6px",
-                  border: "1px solid #d1d5db",
-                  fontSize: "13px",
-                }}
+                style={inputStyle}
               />
+              <ScoreBar score={score} label="" />
             </div>
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
-                paddingTop: "20px",
+                flexDirection: "column",
+                justifyContent: "flex-end",
               }}
             >
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  color: "#374151",
+                  cursor: "pointer",
+                  marginBottom: "8px",
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={blockApproval}
                   onChange={(e) => setBlockApproval(e.target.checked)}
+                  style={{ width: "16px", height: "16px" }}
                 />
                 Block approval
               </label>
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "#9ca3af",
+                  lineHeight: "1.4",
+                }}
+              >
+                Flag a known limitation that should prevent automatic approval
+              </div>
             </div>
           </div>
 
-          <button
-            type="submit"
-            style={{
-              width: "100%",
-              padding: "8px 16px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: "#3b82f6",
-              color: "white",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor: "pointer",
-            }}
-          >
-            Submit for Review
+          <button type="submit" style={primaryButtonStyle}>
+            🚦 Submit for Review
           </button>
         </form>
       )}
 
-      {/* Approve / Reject actions — visible when pending */}
-      {review?.status === "pending_review" && (
+      {/* ---- Review actions (approve/reject) — only when pending ---- */}
+      {review?.status === "pending_review" && activeSection === "review" && (
         <div style={{ marginBottom: "16px" }}>
           {/* Approve */}
-          <div style={{ marginBottom: "12px" }}>
-            <label
-              style={{ display: "block", fontSize: "12px", fontWeight: "600", marginBottom: "4px" }}
-            >
-              Approval Comment (optional)
-            </label>
+          <div
+            style={{
+              padding: "14px",
+              backgroundColor: "#f0fdf4",
+              borderRadius: "10px",
+              border: "1px solid #bbf7d0",
+              marginBottom: "12px",
+            }}
+          >
+            <label style={labelStyle}>Approval Note (optional)</label>
             <input
               type="text"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="Add a note…"
-              style={{
-                width: "100%",
-                padding: "6px 8px",
-                borderRadius: "6px",
-                border: "1px solid #d1d5db",
-                fontSize: "13px",
-                boxSizing: "border-box",
-                marginBottom: "6px",
-              }}
+              placeholder="Add a note for the record…"
+              style={{ ...inputStyle, marginBottom: "8px" }}
             />
             <button
               onClick={handleApprove}
-              style={{
-                width: "100%",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                border: "none",
-                backgroundColor: "#22c55e",
-                color: "white",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: "pointer",
-              }}
+              style={{ ...primaryButtonStyle, backgroundColor: "#22c55e" }}
             >
-              Approve
+              ✅ Approve Deliverable
             </button>
           </div>
 
           {/* Reject */}
-          <form onSubmit={handleReject}>
-            <label
-              style={{ display: "block", fontSize: "12px", fontWeight: "600", marginBottom: "4px" }}
-            >
-              Rejection Reason (required)
-            </label>
-            <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Describe what must be revised…"
-              rows={2}
-              required
+          <div
+            style={{
+              padding: "14px",
+              backgroundColor: "#fef2f2",
+              borderRadius: "10px",
+              border: "1px solid #fecaca",
+            }}
+          >
+            <form onSubmit={handleReject}>
+              <label style={labelStyle}>
+                Rejection Reason <span style={{ color: "#dc2626" }}>*</span>
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Describe what must be revised before approval…"
+                rows={2}
+                required
+                style={{ ...inputStyle, resize: "vertical", marginBottom: "8px" }}
+              />
+              <button
+                type="submit"
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "1px solid #dc2626",
+                  backgroundColor: "white",
+                  color: "#dc2626",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                }}
+              >
+                ❌ Reject &amp; Request Changes
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Already decided */}
+      {review && (review.status === "approved" || review.status === "rejected") && (
+        <div
+          style={{
+            padding: "14px",
+            backgroundColor: "#f9fafb",
+            borderRadius: "10px",
+            textAlign: "center",
+            fontSize: "13px",
+            color: "#6b7280",
+            marginBottom: "16px",
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          This deliverable has been {review.status}. See the history below for
+          details.{" "}
+          {review.status === "rejected" && (
+            <button
+              onClick={() => setActiveSection("submit")}
               style={{
-                width: "100%",
-                padding: "6px 8px",
+                display: "block",
+                margin: "10px auto 0",
+                padding: "6px 16px",
                 borderRadius: "6px",
                 border: "1px solid #d1d5db",
-                fontSize: "13px",
-                resize: "vertical",
-                boxSizing: "border-box",
-                marginBottom: "6px",
-              }}
-            />
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                border: "1px solid #dc2626",
                 backgroundColor: "white",
-                color: "#dc2626",
-                fontSize: "13px",
+                fontSize: "12px",
                 fontWeight: "600",
                 cursor: "pointer",
               }}
             >
-              Reject &amp; Request Changes
+              Resubmit for Review
             </button>
-          </form>
+          )}
         </div>
       )}
 
-      {/* Action log */}
+      {/* History */}
       {actionLog.length > 0 && (
         <div>
           <h3
             style={{
               fontSize: "13px",
-              fontWeight: "bold",
-              marginBottom: "8px",
+              fontWeight: "700",
               color: "#374151",
+              marginBottom: "8px",
             }}
           >
             Review History
@@ -524,8 +807,8 @@ export function QualityGateTab({
           <div
             style={{
               border: "1px solid #e5e7eb",
-              borderRadius: "8px",
-              padding: "8px 12px",
+              borderRadius: "10px",
+              padding: "4px 14px",
             }}
           >
             {[...actionLog].reverse().map((entry, i) => (
@@ -537,3 +820,37 @@ export function QualityGateTab({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Shared styles
+// ---------------------------------------------------------------------------
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: "12px",
+  fontWeight: "600",
+  color: "#374151",
+  marginBottom: "5px",
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  borderRadius: "8px",
+  border: "1px solid #d1d5db",
+  fontSize: "13px",
+  boxSizing: "border-box",
+  fontFamily: "inherit",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 16px",
+  borderRadius: "8px",
+  border: "none",
+  backgroundColor: "#3b82f6",
+  color: "white",
+  fontSize: "13px",
+  fontWeight: "700",
+  cursor: "pointer",
+};
