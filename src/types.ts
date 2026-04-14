@@ -114,6 +114,14 @@ export interface RejectParams {
   comment: string;
 }
 
+/** Standard action result with optional message for idempotent no-ops. */
+export interface ActionResult<T = unknown> {
+  ok: boolean;
+  review?: T;
+  message?: string;
+  error?: string;
+}
+
 /** UI data shape for `review_status`. */
 export interface ReviewStatusData {
   review: DeliverableReview | null;

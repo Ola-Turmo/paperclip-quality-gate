@@ -1,9 +1,8 @@
 import type { PluginContext, PluginEvent, PluginEventType } from "@paperclipai/plugin-sdk";
 import type {
+  ActionResult,
   ApproveParams,
-  CommentCreatedEvent,
-  IssueCreatedEvent,
-  IssueUpdatedEvent,
+  IssueStatus,
   QualityGateReviewInput,
   RejectParams,
   ReviewHistoryData,
@@ -375,12 +374,6 @@ const plugin = definePlugin({
         const cfg = await getConfig(ctx);
         const issueId = p.issue_id as string;
 
-        const evaluation = evaluateDeliverable({
-          qualityScore: p.quality_score as number | undefined,
-          blockApproval: p.block_approval as boolean | undefined,
-          config: cfg,
-        });
-
         let companyId = "";
         try {
           const issue = await ctx.issues.get(issueId, "");
@@ -389,31 +382,69 @@ const plugin = definePlugin({
           // fallback: use empty string
         }
 
-        const review = buildNewReview({
+        // Run full quality evaluation to determine correct status
+        const evaluation = evaluateDeliverable({
+          qualityScore: p.quality_score as number | undefined,
+          blockApproval: p.block_approval ?? false,
+          config: cfg,
+        });
+
+        let review = buildNewReview({
           issueId,
           companyId,
           summary: p.summary as string | undefined,
-          qualityScore: p.quality_score as number | undefined,
-          blockApproval: p.block_approval as boolean | undefined,
+          qualityScore: evaluation.overallScore,
+          blockApproval: p.block_approval ?? false,
           reviewerName: "User",
           qualityChecks: evaluation.checks,
           evaluationSummary: evaluation.summary,
         });
 
+        // Determine target issue status based on evaluation outcome
+        let targetStatus = "in_review";
+        if (evaluation.autoRejected) {
+          // Score below autoRejectBelow — set back to in_progress (agent should fix)
+          review = updateReviewStatus(review, "rejected", {
+            action: `auto-rejected (score ${evaluation.overallScore} < ${cfg.autoRejectBelow})`,
+            reviewer: "agent",
+            reviewerName: "System",
+            comment: evaluation.summary,
+            qualityScore: evaluation.overallScore,
+            auto: true,
+          });
+          targetStatus = "in_progress";
+        } else if (evaluation.blockThresholdBreached) {
+          // Score between autoRejectBelow and blockThreshold — blocked for human review
+          targetStatus = "blocked";
+        } else if (evaluation.passed) {
+          // Score meets minimum — set to in_review for human approval
+          targetStatus = "in_review";
+        } else {
+          // Below minQualityScore but above blockThreshold — in_review for human review
+          targetStatus = "in_review";
+        }
+
         await putReview(ctx, review);
 
         if (companyId) {
           try {
-            await ctx.issues.update(issueId, { status: "blocked" }, companyId);
+            await ctx.issues.update(issueId, { status: targetStatus as IssueStatus }, companyId);
+            await ctx.issues.createComment(
+              issueId,
+              buildSubmitComment({
+                qualityScore: evaluation.overallScore,
+                evaluationSummary: evaluation.summary,
+                blockApproval: p.block_approval ?? false,
+                qualityChecks: evaluation.checks,
+              }),
+              companyId,
+            );
           } catch (err) {
-            ctx.logger.warn("submit_for_review: failed to update issue status", { error: String(err) });
+            ctx.logger.warn("submit_for_review: failed to update issue", { error: String(err) });
           }
         }
 
-        ctx.streams.emit("review_updated", {
-          issueId: review.issueId,
-          review,
-        });
+        ctx.streams.emit("review_updated", { issueId: review.issueId, review });
 
         return { ok: true, review, evaluation };
       },
@@ -424,11 +455,16 @@ const plugin = definePlugin({
     // -------------------------------------------------------------------------
     ctx.actions.register(
       "approve_deliverable",
-      async (params: Record<string, unknown>): Promise<{ ok: boolean; review?: unknown; error?: string }> => {
+      async (params: Record<string, unknown>): Promise<ActionResult> => {
         const p = params as unknown as ApproveParams;
         const review = await getReview(ctx, p.issue_id);
         if (!review) {
           return { ok: false, error: "No review found for this issue." };
+        }
+
+        // Idempotency: already approved is a no-op, not an error
+        if (review.status === "approved") {
+          return { ok: true, review, message: "Already approved." };
         }
 
         const updated = updateReviewStatus(review, "approved", {
@@ -461,11 +497,16 @@ const plugin = definePlugin({
     // -------------------------------------------------------------------------
     ctx.actions.register(
       "reject_deliverable",
-      async (params: Record<string, unknown>): Promise<{ ok: boolean; review?: unknown; error?: string }> => {
+      async (params: Record<string, unknown>): Promise<ActionResult> => {
         const p = params as unknown as RejectParams;
         const review = await getReview(ctx, p.issue_id);
         if (!review) {
           return { ok: false, error: "No review found for this issue." };
+        }
+
+        // Idempotency: already rejected → no-op (don't re-comment or reset status)
+        if (review.status === "rejected") {
+          return { ok: true, review, message: "Already rejected." };
         }
 
         const updated = updateReviewStatus(review, "rejected", {

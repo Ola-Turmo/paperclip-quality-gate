@@ -69,17 +69,24 @@ export async function getReview(
   ctx: PluginContext,
   issueId: string,
 ): Promise<DeliverableReview | null> {
-  const reviews = await getReviewsMap(ctx);
-  return reviews[issueId] ?? null;
+  const review = await ctx.state.get({
+    scopeKind: "issue",
+    scopeId: issueId,
+    stateKey: STATE_KEYS.REVIEWS,
+  });
+  return (review as DeliverableReview | null) ?? null;
 }
 
 export async function putReview(
   ctx: PluginContext,
   review: DeliverableReview,
 ): Promise<void> {
-  const reviews = await getReviewsMap(ctx);
-  reviews[review.issueId] = review;
-  await putReviewsMap(ctx, reviews);
+  // Store each review under its own per-issue state key — fully atomic,
+  // no read-modify-write races across concurrent reviews on different issues.
+  await ctx.state.set(
+    { scopeKind: "issue", scopeId: review.issueId, stateKey: STATE_KEYS.REVIEWS },
+    review,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +259,9 @@ export function evaluateDeliverable(params: {
       );
     }
   } else {
-    // Fall back to single score: add ±1 variance per category
+    // Fall back to single score: derive per-category scores from base score.
+    // Use a deterministic mapping so the same qualityScore always produces the
+    // same category breakdown (no Math.random — reproducibility matters).
     const base = params.qualityScore ?? 5;
     const categories: QualityCheckCategory[] = [
       "completeness",
@@ -261,8 +270,14 @@ export function evaluateDeliverable(params: {
       "test_coverage",
       "documentation",
     ];
+    // Deterministic per-category offset derived from category name hash.
+    // Gives stable ±1 variance without Math.random.
     for (const cat of categories) {
-      const variance = Math.round((Math.random() - 0.5) * 2);
+      let hash = 5381;
+      for (let i = 0; i < cat.length; i++) hash = ((hash << 5) + hash) + cat.charCodeAt(i);
+      hash = ((hash << 5) + hash) + base;
+      const variant = Math.abs(hash) % 3;
+      const variance = variant - 1; // -1, 0, or +1
       const score = Math.max(0, Math.min(10, base + variance));
       checks.push(
         evaluateCategory(cat, score, params.blockApproval ?? false),
@@ -276,7 +291,8 @@ export function evaluateDeliverable(params: {
   // Auto-reject very low scores — agent can fix and retry without human review
   const autoRejected = overallScore < cfg.autoRejectBelow;
 
-  // Block threshold breach — score is low enough to require human review (blocked)
+  // Block threshold breach — score between autoRejectBelow and blockThreshold
+  // needs human review (blocked status). Scores < autoRejectBelow are auto-rejected.
   const blockThresholdBreached =
     !autoRejected && overallScore < cfg.blockThreshold;
 
