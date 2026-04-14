@@ -22,6 +22,10 @@ const manifest: PaperclipPluginManifestV1 = {
     "events.subscribe",
     "plugin.state.read",
     "plugin.state.write",
+    "issues.read",
+    "issues.update",
+    "issue.comments.read",
+    "issue.comments.create",
     "ui.detailTab.register",
   ],
   entrypoints: {

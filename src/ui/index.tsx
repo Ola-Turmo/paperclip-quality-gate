@@ -327,7 +327,7 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await (submitAction as (p: SubmitForReviewParams) => Promise<unknown>)({
+      await (submitAction as unknown as (p: SubmitForReviewParams) => Promise<unknown>)({
         issue_id: issueId,
         summary,
         quality_score: score,
@@ -344,7 +344,7 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
 
   async function handleApprove() {
     try {
-      await (approveAction as (p: ApproveParams) => Promise<unknown>)({
+      await (approveAction as unknown as (p: ApproveParams) => Promise<unknown>)({
         issue_id: issueId,
         comment,
       });
@@ -363,7 +363,7 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
       return;
     }
     try {
-      await (rejectAction as (p: RejectParams) => Promise<unknown>)({
+      await (rejectAction as unknown as (p: RejectParams) => Promise<unknown>)({
         issue_id: issueId,
         comment: rejectReason,
       });

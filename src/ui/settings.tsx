@@ -1,6 +1,6 @@
 import * as React from "react";
 import {
-  useInstanceConfig,
+  usePluginData,
   usePluginAction,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
@@ -22,7 +22,7 @@ interface QualityGateSettings {
 export function QualityGateSettings({
   context,
 }: PluginSettingsPageProps) {
-  const config = useInstanceConfig<QualityGateSettings>();
+  const { data: config } = usePluginData<QualityGateSettings>("plugin_config_get", {});
   const saveConfig = usePluginAction("plugin_config_update");
 
   const [minScore, setMinScore] = React.useState(

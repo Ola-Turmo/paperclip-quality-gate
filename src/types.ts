@@ -24,6 +24,8 @@ export interface DeliverableReview {
   deliverableSummary?: string;
   qualityScore?: number;
   blockApproval: boolean;
+  /** Whether this review was auto-rejected (score < autoRejectBelow). */
+  autoRejected?: boolean;
   /** Structured quality check results */
   qualityChecks?: QualityCheck[];
   /** Human-readable evaluation summary */
@@ -52,7 +54,10 @@ export type QualityCheckCategory =
 export interface QualityEvaluation {
   overallScore: number; // 0–10 weighted average
   passed: boolean;
+  /** Score < autoRejectBelow — agent can retry without human review */
   autoRejected: boolean;
+  /** Score between blockThreshold and autoRejectBelow — needs human review, issue → blocked */
+  blockThresholdBreached: boolean;
   checks: QualityCheck[];
   blockers: string[]; // human-readable blocking issues
   summary: string;

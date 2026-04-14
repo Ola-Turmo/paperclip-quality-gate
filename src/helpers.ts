@@ -36,7 +36,7 @@ export async function getConfig(
     scopeKind: "instance",
     stateKey: STATE_KEYS.CONFIG,
   });
-  return (state?.value as QualityGateConfig) ?? DEFAULT_CONFIG;
+  return (state as QualityGateConfig) ?? DEFAULT_CONFIG;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,14 +52,14 @@ export async function getReviewsMap(
     scopeKind: "instance",
     stateKey: STATE_KEYS.REVIEWS,
   });
-  return (state?.value as ReviewsMap) ?? {};
+  return (state as ReviewsMap) ?? {};
 }
 
 export async function putReviewsMap(
   ctx: PluginContext,
   reviews: ReviewsMap,
 ): Promise<void> {
-  await ctx.state.put(
+  await ctx.state.set(
     { scopeKind: "instance", stateKey: STATE_KEYS.REVIEWS },
     reviews,
   );
@@ -273,8 +273,12 @@ export function evaluateDeliverable(params: {
   const overallScore = computeWeightedScore(checks);
   const failedChecks = checks.filter((c) => !c.passed);
 
-  // Auto-reject very low scores
+  // Auto-reject very low scores — agent can fix and retry without human review
   const autoRejected = overallScore < cfg.autoRejectBelow;
+
+  // Block threshold breach — score is low enough to require human review (blocked)
+  const blockThresholdBreached =
+    !autoRejected && overallScore < cfg.blockThreshold;
 
   // Determine pass/fail
   const hasBlockers = blockers.length > 0;
@@ -287,7 +291,11 @@ export function evaluateDeliverable(params: {
 
   if (autoRejected) {
     blockers.push(
-      `Score ${overallScore} is below auto-reject threshold (${cfg.autoRejectBelow}) — automatically rejected.`,
+      `Score ${overallScore} is below auto-reject threshold (${cfg.autoRejectBelow}) — automatically rejected. Agent should fix and resubmit.`,
+    );
+  } else if (blockThresholdBreached) {
+    blockers.push(
+      `Score ${overallScore} below block threshold (${cfg.blockThreshold}) — human review required.`,
     );
   } else if (overallScore < cfg.minQualityScore) {
     blockers.push(
@@ -298,7 +306,9 @@ export function evaluateDeliverable(params: {
   const summary = passed
     ? `✅ Quality gate passed (score: ${overallScore}/10).`
     : autoRejected
-    ? `❌ Auto-rejected (score: ${overallScore}/10 below ${cfg.autoRejectBelow}).`
+    ? `❌ Auto-rejected (score: ${overallScore}/10 below ${cfg.autoRejectBelow}). Agent should fix and resubmit.`
+    : blockThresholdBreached
+    ? `🚫 Quality gate blocked (score: ${overallScore}/10 below ${cfg.blockThreshold}) — human review required.`
     : blockers.length > 0
     ? `⚠️ Quality gate blocked — ${blockers[0]}`
     : `⚠️ Quality score ${overallScore}/10 is below minimum (${cfg.minQualityScore}).`;
@@ -307,6 +317,7 @@ export function evaluateDeliverable(params: {
     overallScore,
     passed,
     autoRejected,
+    blockThresholdBreached,
     checks,
     blockers,
     summary,
