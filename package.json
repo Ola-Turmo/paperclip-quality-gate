@@ -1,0 +1,16 @@
+{
+  "name": "uos-quality-gate",
+  "version": "0.1.0",
+  "description": "Paperclip plugin for quality gate",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "plugin:typecheck": "tsc --noEmit",
+    "plugin:build": "node esbuild.config.mjs"
+  },
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "file:/root/work/paperclip/packages/plugins/sdk",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
+  }
+}
