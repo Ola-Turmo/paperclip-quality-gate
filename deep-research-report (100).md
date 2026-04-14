@@ -1,353 +1,216 @@
-# Organizational Learning Plugin for Paperclip
+# Paperclip Quality-Gate Plugin Architecture
 
-**Executive Summary:** We propose an event-driven **Paperclip plugin** to capture organizational learning across agents and tasks. It will subscribe to domain events (agent runs, task updates, comments, etc.), extract learning signals, and synthesize artifacts (knowledge entries, playbooks, policies). The plugin uses Paperclip’s manifest/worker/UI surfaces: defining required *capabilities*, registering *event handlers* and *scheduled jobs*, providing *agent tools*, and offering UI extensions (detail tabs, dashboards). We store learned data in `plugin.entities` (structured DB) or `plugin.state` and surface it via a custom UI. Audit and idempotency are ensured by Paperclip’s activity log and at-least-once delivery model. The architecture leverages Paperclip’s standard extension points【57†L748-L756】【60†L1619-L1630】. Below is a comprehensive design, MVP plan, and implementation sketch.
+We recommend implementing the deliverable quality-and-review **gate as a Paperclip plugin**. The plugin runtime provides event hooks, persistent state, and UI extension points needed for this flow, without altering core task or approval logic【13†L609-L618】【32†L1039-L1043】. A plugin can subscribe to agent and issue events, update task status, and maintain its own review records. In contrast, an *adapter* is for new agent types (not relevant here) and a simple *agent tool* would not span tasks or UI; a plugin is the proper cross-cutting mechanism.
 
-## Plugin Architecture & Surfaces 
+The plugin’s manifest (in `dist/manifest.js`) should declare an `id`, `version`, `displayName`, `description`, `categories`, `capabilities`, `entrypoints`, and (if needed) `instanceConfigSchema` and UI `slots`【13†L609-L618】【13†L631-L642】. For example, categories might be `["automation","ui"]`. Capabilities must include **`events.subscribe`** (to listen for task/deliverable events), **`issues.read`/`issues.update`** (to inspect and change task status), **`issue.comments.read/create`** (to log comments about quality), **`plugin.state.read`/`plugin.state.write`** (for persistent review data), and UI permissions (e.g. `ui.detailTab.register` if adding an issue-tab)【13†L609-L618】【32†L1039-L1043】. The plugin worker (in TypeScript) uses `definePlugin({ ... })` from `@paperclipai/plugin-sdk` (as shown in examples【21†L1023-L1030】). Its `register(ctx)` callback will hook into events, register any scheduled jobs or agent tools, and set up `ctx.data`/`ctx.actions` handlers for the UI【21†L1048-L1052】【21†L1079-L1083】.
 
-- **Plugin vs. Adapter/Tool:** We implement as a Paperclip *plugin* (instance-wide, out-of-process) rather than an adapter or agent tool. This is because learning spans many entities and requires UI and storage. Plugins subscribe to typed domain events, run jobs, define tools/UI, and write plugin-specific state【57†L748-L756】. (Adapters are for new agent types; tools are called during runs.) Plugins cannot override core logic (e.g. approvals)【57†L758-L769】, but we need only to react and add knowledge. 
+**Minimum Capability Set:** As an example, the manifest’s `capabilities` array might include:
+- `events.subscribe` (to get Paperclip domain events)【18†L1102-L1105】.  
+- `issues.read`, `issues.update` (to examine and move tasks)【32†L1029-L1036】.  
+- `issue.comments.read`, `issue.comments.create` (to annotate tasks)【32†L1029-L1036】.  
+- `plugin.state.read`, `plugin.state.write` (to store review status per deliverable)【32†L1040-L1043】.  
+- UI registration caps (e.g. `ui.detailTab.register`, `ui.page.register`) if adding UI components【13†L631-L642】【32†L1058-L1064】.  
+- Optionally `jobs.schedule` if periodic scanning is needed, and `agent.tools.register` if we offer an agent-callable tool.  
 
-- **Manifest:** The `manifest.ts` (as per `PaperclipPluginManifestV1`) must include `id`, `version`, `displayName`, `description`, `categories`, `capabilities`, `entrypoints.worker`, and optional `ui.slots`, `tools`, `jobs`, `webhooks`【13†L609-L618】【62†L310-L318】. For example, we might use `categories: ["automation","ui"]`. `capabilities` lists required permissions (see below). We can define `instanceConfigSchema` via Zod for plugin settings.  
+Each capability gate is enforced by Paperclip’s SDK (for example, declaring `issues.update` is required before calling `ctx.issues.update(...)`)【13†L609-L618】【32†L1045-L1053】. The forbidden capabilities (e.g. `approval.decide`) are not needed here, since we do not override core approvals【32†L1067-L1075】.
 
-- **Worker:** In `worker.ts`, we `definePlugin({ register(ctx) { ... } })`. We use `ctx.events.on(...)` to handle events, `ctx.jobs.register(...)` for schedules, `ctx.data.register`/`ctx.actions.register` for UI data/actions, and `ctx.tools.register` for agent-callable functions. This follows examples from other plugins【21†L1048-L1052】【21†L1079-L1083】. All mutating actions go through the host API (e.g. `ctx.issues.update`, `ctx.entities.upsert`) with capability checks.
+## MVP Scope
 
-- **UI:** We provide UI via React bundles. The manifest’s `ui.slots` can include pages, detail tabs, dashboard widgets, settings pages, etc. The host will mount these components in Paperclip’s UI and supply a bridge with hooks like `usePluginData` and `usePluginAction`【57†L772-L780】【18†L1218-L1226】. For example, a “Knowledge Review” tab on a task, or a “Learning Dashboard” widget on home.
+An MVP plugin can focus on the core flow: **detect – evaluate – block – notify – human review – finalize**. Specifically:
+- **Detect deliverable:** Subscribe to events indicating a deliverable is ready. For example, the plugin can listen to `agent.run.finished` (or `agent.run.completed`) events【18†L1102-L1105】 and check if the run produced an external artifact (e.g. a document or email). Alternatively, hook `issue.comment.created` if agents post deliverables as issue comments.  
+- **Evaluate quality:** In the event handler, apply basic quality checks (e.g. grammar, style, required sections). Even a simple placeholder check or call to an LLM could work. Compute a “score” or pass/fail judgment.  
+- **Mark blocked/pending-review:** If quality fails, update the corresponding task (issue) status to something like *“Blocked”* or *“In Review”*【41†L204-L212】. Use `ctx.issues.update({issueId, updates: { status: "blocked" }})`【32†L1029-L1036】. Save the quality score and metadata in plugin state (`ctx.state`) keyed by the issue ID. Optionally post a comment to the issue via `ctx.issues.comment.create` noting that review is pending.  
+- **Hand off to human:** In the UI, show the deliverable as pending review. The human operator (board) then reviews it. The plugin can support two actions: *Approve* or *Reject*.  
+  - On **Approve**, the plugin sets status to “Done” (or clears the block) and records the approval in state/audit log.  
+  - On **Reject** (or *Request Revision*), the plugin lets the human enter rejection reasons and required edits. It then updates the state (and possibly comments on the issue) so the agent can revise the deliverable. The task might return to “In Progress” or “Blocked” again until fixed.  
+- **Audit trail:** Each approve/reject should be logged. The plugin can write to the activity log (`ctx.activity.log.write`) or just store history entries in `ctx.state`.  
 
-- **Storage:** We store plugin data either in `ctx.state` (key/value) or the `plugin_entities` table【60†L1619-L1630】. For structured records (e.g. learning artifacts, scorecards) we recommend `plugin_entities` (entity_type scoping) for querying. Primitive per-issue flags can go in `ctx.state`. All secrets/config go through host secrets.
+This covers the user story with minimal plumbing. We will flesh out these steps in code (see pseudocode below).  
 
-- **Audit:** All plugin actions that mutate data must log to the activity log (`ctx.activity.log.write`) with `actor_type = plugin`【60†L1648-L1656】. We rely on at-least-once delivery and idempotent handlers (check for existing state) to handle duplicates.
+## Plugin Manifest (Example)
 
-## Learning Goals & Axes
-
-We target these organizational learning dimensions:
-
-- **Knowledge Capture:** Automatically harvest information from *agent runs, issue descriptions, comments, review notes*, etc. (e.g. lessons from failures or solutions).  
-- **Synthesis:** Combine captured data into structured artifacts: **playbooks**, **templates**, **FAQs**, **policy rules** (e.g. how to handle a type of request), **embeddings** for semantic search.  
-- **Feedback Loops:** Continuously evaluate agent outputs against success metrics (e.g. task completion rates, quality scores). Generate *alerts* or *retry tasks* if needed.  
-- **Metrics & Scorecards:** Define KPIs (e.g. code review turnaround, doc quality). Track them as *scorecards*, compare over time, and visualize on a dashboard.  
-- **Retention:** Store knowledge so future agents/humans can reuse it: e.g. a corporate wiki of solutions or a vector database of answers.  
-- **Onboarding:** Use the captured knowledge to train or instruct new agents (e.g. loading policies into agent context).  
-- **Policy/Rule Extraction:** Infer formal rules from data (e.g. if an agent repeatedly errs on X, create a new guardrail policy).  
-- **Retrospectives:** After major milestones (goal completion), automatically generate a post-mortem report summarizing what went well or what knowledge was gained.  
-- **Continuous Improvement:** Iterate on goals/strategies. E.g. if an AI marketer’s output is off-target, feedback this into retraining or updated instructions.
-
-Each of these axes maps to plugin features: e.g. capturing comes from event handlers; synthesis uses jobs or agent tools; metrics are stored/counted in state; retrospectives could be a scheduled job triggering a summarization agent run.
-
-## Data Sources & Detection Triggers
-
-We subscribe to Paperclip events and webhooks to detect learning opportunities:
-
-- **Agent Runs:** `agent.run.finished` (or `.failed`) events【18†L1102-L1105】. E.g. a developer agent finishes writing code – we capture the outcome and log it as a deliverable.  
-- **Task Issues:** `issue.created`, `issue.updated`, `issue.comment.created`. Agents express themselves via tasks and comments, so we capture new information or corrections from these. (The `issue.updated` payload is partial【52†L225-L233】, so we may fetch full details with `ctx.issues` API if needed.)  
-- **Assets:** If we use attachments or docs, monitor `asset.created` (if such events exist) or include assets in issue comments.  
-- **Approvals:** `approval.created`, `approval.decided` events【18†L1107-L1110】 can indicate governance decisions or strategy approvals to learn from.  
-- **External Webhooks:** We can define plugin webhooks (in manifest) to receive signals, e.g. from Slack notifications, GitHub events, or email gateways. The worker’s `handleWebhook` can ingest these.  
-- **Scheduled Jobs:** Some learning might not be event-driven. For example, daily aggregation, periodic review tasks (ctx.jobs.register with cron) can trigger summarization jobs.  
-- **Manual/Agent Tools:** Provide explicit tools like `recordKnowledge`, `submitPostmortem`, etc. An agent could call `ctx.tools.register("record-knowledge", ...)` during a run to flag something as important. Humans could also invoke plugin actions via UI to tag learnable items.
-
-**Capabilities needed:** `events.subscribe`, `jobs.schedule`, `webhooks.receive` for these triggers, plus data access (`issues.read`, `issue.comments.read`, etc.), external calls (`http.outbound` for external APIs)【32†L1045-L1053】.
-
-## Learning Artifacts & Storage
-
-We generate and persist various artifacts:
-
-- **Knowledge Base Entries:** Structured records (e.g. Q&A, how-tos). Stored as plugin entities `entity_type = "knowledge_entry"`, with `data_json` holding title/content.  
-- **Templates/Playbooks:** Predefined task templates. E.g. an agent run might create an `entity_type = "playbook"` linking to a list of step templates.  
-- **Policies/Rules:** Formal rules derived from data. Could store as `entity_type = "policy"`, with fields like `rule_condition`, `action`.  
-- **Embeddings:** If using semantic search, we might call an embedding service and store vectors externally; plugin could store references in `plugin.entities` or an external vector DB (not directly managed by plugin).  
-- **Scorecards:** Define metrics per goal or team. We can store current/target values in a table (e.g. `entity_type = "scorecard"` or a separate plugin_state key).  
-- **Retrospectives:** `entity_type = "retrospective"` records summarizing post-mortems with key insights.
-
-For storage, **Plugin State** (`ctx.state`) is simple KV (good for flags or small JSON per scope). **Plugin Entities** is a full table (structured records)【60†L1619-L1630】. We will use `plugin_entities` for all record types above, with columns as per spec (id, plugin_id, entity_type, scope, data_json)【60†L1619-L1630】. This allows indexing and querying of our learning artifacts. Non-structured config (thresholds, mappings) can be `ctx.config` or `ctx.state`.
-
-### Example Schema (Markdown Tables)
-
-We propose tables based on `plugin_entities` (id, plugin_id, entity_type, etc.):
-
-#### Deliverables Table (`entity_type = "deliverable"`)  
-
-| Column        | Type    | Description |
-|---------------|---------|-------------|
-| id            | uuid    | Unique record ID |
-| plugin_id     | uuid    | This plugin’s ID |
-| entity_type   | text    | `"deliverable"` |
-| scope_kind    | enum    | `"issue"` or `"run"` |
-| scope_id      | uuid    | ID of the related issue or run |
-| external_id   | text    | Optional external ref (e.g. Slack thread) |
-| title         | text    | Short description of deliverable |
-| status        | text    | e.g. `"pending_review"`, `"approved"`, `"rejected"` |
-| data_json     | jsonb   | Detailed info (score, feedback list, attachments) |
-| created_at    | timestamp | When recorded |
-| updated_at    | timestamp | Last update time |
-
-#### Learning Artifacts Table (`entity_type = "knowledge_entry"/"policy"/"playbook"`)  
-
-| Column        | Type    | Description |
-|---------------|---------|-------------|
-| id            | uuid    | Unique record ID |
-| plugin_id     | uuid    | This plugin’s ID |
-| entity_type   | text    | e.g. `"knowledge_entry"`, `"policy"`, `"playbook"` |
-| scope_kind    | text    | Context (e.g. `"company"`, or related issue) |
-| scope_id      | uuid    | ID for scope (e.g. company ID) |
-| external_id   | text    | Optional source ref (e.g. source document) |
-| title         | text    | Name or summary |
-| status        | text    | (e.g. `"active"`, `"draft"`) |
-| data_json     | jsonb   | Content/details (text body, steps, rules) |
-| created_at    | timestamp | Creation time |
-| updated_at    | timestamp | Last modified |
-
-#### Scorecards Table (`entity_type = "scorecard"`)  
-
-| Column      | Type    | Description |
-|-------------|---------|-------------|
-| id          | uuid    | Unique scorecard ID |
-| plugin_id   | uuid    | This plugin’s ID |
-| entity_type | text    | `"scorecard"` |
-| scope_kind  | text    | e.g. `"company"` or `"project"` |
-| scope_id    | uuid    | ID of scope (company/project) |
-| external_id | text    | e.g. metric name or goal ID |
-| title       | text    | e.g. `"Retrospective Quality"` |
-| status      | text    | (optional) |
-| data_json   | jsonb   | { current: number, target: number, history: [ ... ] } |
-| created_at  | timestamp | Created time |
-| updated_at  | timestamp | Last updated |
-
-#### Audit Log Table (`entity_type = "audit"`)  
-
-We rely primarily on Paperclip’s activity log for audit【60†L1648-L1656】. However, plugins can log within `data_json` or use a separate `audit` type:
-
-| Column      | Type    | Description |
-|-------------|---------|-------------|
-| id          | uuid    | Unique ID |
-| plugin_id   | uuid    | This plugin’s ID |
-| entity_type | text    | `"audit"` |
-| scope_kind  | text    | e.g. `"issue"` |
-| scope_id    | uuid    | Related record ID |
-| external_id | text    | (optional context) |
-| title       | text    | (e.g. `"Quality Check Logged"`) |
-| status      | text    | (optional) |
-| data_json   | jsonb   | { action: "approved", user: "Alice", note: "...", timestamp: "..." } |
-| created_at  | timestamp | When occurred |
-
-*(These schemas assume we use `plugin_entities`. If we used `ctx.state`, records would be per-key instead.)*
-
-## Events & Capabilities
-
-We subscribe to Paperclip core events and plugin-emitted events. Key events include:
-
-- **Task/Issue Events:**  
-  - `issue.created/updated` (catch new tasks or status changes)  
-  - `issue.comment.created` (new discussion, often agent feedback)  
-  - *“Heartbeat” Events:* e.g. `goal.completed`, if available, to trigger retrospectives.
-
-- **Agent Run Events:**  
-  - `agent.run.started/finished/failed/cancelled`【18†L1102-L1105】. We focus on `finished` to process completed work. The payload includes `runId`, `agentId`, `projectId`, etc., which we can use to fetch run logs or results.  
-
-- **Approval Events:**  
-  - `approval.created/decided`【18†L1107-L1110】. Agents often use approvals for hiring or strategy; we can learn from these decisions.
-
-- **Custom/Plugin Events:**  
-  - We may emit and subscribe to `plugin.<pluginId>.*` events for internal coordination (e.g. `plugin.learning.reviewed`).
-
-- **Webhooks:**  
-  - Plugin may receive webhooks from external systems (Slack posts, GitHub issues/comments, etc.) if configured in `manifest.webhooks`. For example, a GitHub webhook could feed into the learning loop.
-
-- **Scheduled Jobs:**  
-  - Define cron jobs (`ctx.jobs.register`) for periodic tasks: e.g., nightly summary, weekly retrospective prompts, quarterly metric rollups.
-
-**Capabilities required:**  
-We declare these in the manifest:
-
-- `events.subscribe` – to receive events【32†L1045-L1053】.  
-- `issues.read`, `issues.update`, `issue.comments.read/create` – to inspect and post updates to tasks (for status changes, comments)【32†L1029-L1036】.  
-- `agents.read`, `agents.update` – if modifying agent schedules or asking new tasks.  
-- `goals.read/update` – if writing retrospective summaries as goals.  
-- `plugin.entities.upsert`/`list` (via `ctx.entities`) – for `plugin_entities` access. (Note: This is not listed in capabilities but is assumed allowed for plugin state.)  
-- `plugin.state.read/write` – for simple state flags.  
-- `events.emit` – if we broadcast custom events (granted by default with subscribe).  
-- `jobs.schedule` – to register scheduled jobs.  
-- `webhooks.receive` – to define inbound webhooks.  
-- `http.outbound` – to call external APIs (e.g. GPT, embedding service).  
-- `agent.tools.register` – to contribute any tools agents use (e.g. lookup knowledge).  
-- UI caps: `ui.detailTab.register`, `ui.page.register`, `ui.dashboardWidget.register`, etc., for each UI slot【13†L631-L642】【57†L772-L780】.  
-- `instance.settings.register` – if adding settings pages.  
-- Any **data write** caps needed for external systems (e.g. if writing to issues in an external repo via webhook).
-
-We **avoid** forbidden caps【32†L1067-L1075】: we do *not* try to mutate approvals or skip budget rules.
-
-## Event Flow Diagram
-
-Here is a representative flow (Mermaid) for one axis – **Post-Mortem → Playbook Creation → Enforcement**:
-
-```mermaid
-flowchart LR
-    A[Agent.run.finished (error)] --> B[Plugin: Capture Error & Trigger Review]
-    B --> C[Schedule retrospective job / or manual trigger]
-    C --> D[ctx.tools: use AI to generate Postmortem notes]
-    D --> E[ctx.entities: store Retrospective (with key findings)]
-    E --> F[Plugin UI: Prompt board to create Playbook]
-    F --> G[Board approves playbook draft]
-    G --> H[ctx.entities: create Playbook record]
-    H --> I[Agent tool: retrieve Playbook during similar tasks]
-    I --> J[Future Agent.run checks Playbook => improved outcome]
-
-    click H href "https://example.com#playbook_creation" "Playbook record"
+```ts
+// dist/manifest.js (PaperclipPluginManifestV1)
+export default {
+  id: "@example/paperclip-plugin-quality-gate",
+  apiVersion: 1,
+  version: "0.1.0",
+  displayName: "Quality Gate",
+  description: "Blocks deliverables until a human approves them against quality rules.",
+  categories: ["automation","ui"],
+  minimumPaperclipVersion: "2026.1.0",
+  capabilities: [
+    "events.subscribe",
+    "issues.read",
+    "issues.update",
+    "issue.comments.read",
+    "issue.comments.create",
+    "plugin.state.read",
+    "plugin.state.write",
+    "ui.detailTab.register"
+  ],
+  entrypoints: {
+    worker: "./dist/worker.js",
+    ui: "./dist/ui/"
+  },
+  ui: {
+    slots: [
+      {
+        type: "detailTab",
+        id: "deliverable-review-tab",
+        displayName: "Deliverable Review",
+        entityTypes: ["issue"],
+        exportName: "DeliverableReviewTab"
+      }
+    ]
+  }
+};
 ```
 
-This diagram shows how an error triggers retrospection, capturing knowledge, and producing a reusable playbook, which then influences future runs.
+This manifest (modeled on the spec) declares one UI detail-tab slot on issues【13†L631-L642】. We request permissions for events and issue updates as needed【32†L1029-L1036】. In TypeScript, the plugin would be defined with `definePlugin({...})` in `worker.ts`, using this manifest.
 
-## Representative Lifecycle: Retrospective Learning
+## Event Flow & Lifecycle
 
-1. **Detect Completion:** When a goal or sprint ends, trigger `goal.completed` or via scheduled job. (Alternatively, an agent calls `ctx.emit("plugin.learning.triggerRetrospective")`.)
-2. **Generate Postmortem:** Plugin runs a job invoking an LLM tool (`ctx.tools.register("summarize",...)`) on all issue comments / run logs. The output is a draft retrospective report.
-3. **Review & Refine:** The report is stored (`plugin_entities`, type=`retrospective`) and surfaced in a UI page/tab for a human (or board) to review. They can edit/add insights.
-4. **Create Playbook:** Based on finalized retro, plugin suggests new playbook steps. For example, if many bugs occurred, create a "QA Checklist" playbook (entity_type=`playbook`). The board can approve it via UI action.
-5. **Store & Deploy:** On approval, the playbook (JSON content in `data_json`) is saved. The plugin may then add a snippet to agent prompts (via agent tool or UI to attach to future tasks).
-6. **Enforcement:** For future tasks, agents query the playbook (e.g. `ctx.tools.register("get-playbook", ...)`), integrating it into their workflow. The plugin may also auto-close retrospectives as done and log everything.
+1. **Deliverable Ready:** An agent finishes generating an external artifact. Paperclip emits an `agent.run.finished` event【18†L1102-L1105】. The plugin’s worker has subscribed to this event via `ctx.events.on("agent.run.finished", handler)`. (We can filter by company or project if desired.)【21†L1048-L1052】  
+2. **Evaluate Quality:** In the event handler, fetch the run details or output (if accessible). Compute quality: e.g. run a checklist or external QA tool.  
+3. **Mark Blocked:** If quality is insufficient, call `ctx.issues.update({issueId, updates: { status: "blocked" }})`【32†L1029-L1036】. Then save state, e.g. `ctx.state.set({pluginId, scopeKind:"issue", scopeId: issueId, namespace:"deliverable", stateKey:"review"}, { status: "pending", score: 65, issues: [ ... ] })`. Optionally add an issue comment (via `ctx.issues.comment.create`) noting “Quality gate: pending board review”  
+4. **Human Review UI:** The plugin UI (e.g. a detail-tab on the issue) queries `ctx.state.get({ ... })` via `usePluginData("deliverableStatus")`【21†L1079-L1083】. It shows the score/checklist, and offers **Approve** or **Reject** buttons (bound to plugin actions).  
+5. **Approve:** When the user clicks Approve, the plugin’s `ctx.actions.register("approveDeliverable", handler)` runs. The handler sets state `status="approved"`, logs the decision, and updates the issue to Done (or simply unblocks it).  
+6. **Reject/Revise:** If user rejects or requests changes, `ctx.actions.register("rejectDeliverable", handler)` runs. It records the rejection note in state, and resets the issue status to e.g. “todo” so agents can retry. The state now includes `status="needs_revision"` and a list of comments.  
+7. **Audit Trail:** Each action (approve/reject) writes to `ctx.activity.log.write` or appends to `ctx.state` history. This provides an immutable log of who did what and why.  
 
-## UI Entry Points & Mockups
+   <!-- Sequence: RunFinished event → evaluate → (if fail) update issue.status, create state record → UI shows record → user clicks approve/reject → action updates state & issue status. -->
 
-We expose the following UI slots (in manifest):
+By following this lifecycle, every external artifact is automatically checked and held for board oversight. The use of core task states (“Blocked” or “In Review”) aligns with Paperclip’s workflow【41†L204-L212】, and our plugin does *not* bypass core governance – it simply uses events and issue updates to enforce the gate.
 
-- **Issue Detail Tab:** e.g. `id: "retro-tab", entityTypes: ["issue"]`, component `RetroTab`. Shows playbook suggestions, allows actions on that task.  
-- **Goal Detail Tab:** For overall retrospectives per goal.  
-- **Dashboard Widget:** e.g. `LearningDashboardWidget` on company home page to visualize key metrics and pending learnings.  
-- **Settings Page:** Under plugin settings, a form to configure thresholds or webhook URLs (auto-generated from `instanceConfigSchema`)【21†L1023-L1030】.  
-- **Company Plugin Page:** A main page at `/:company/plugins/our-learning-plugin`【60†L1723-L1731】 listing all learnings, artifacts, scorecards, etc.  
+## UI Entry Points
 
-**Example JSX component (Issue Detail Tab):**
+For minimal UI, the plugin can add a **detail tab on each task (issue)** that contains a deliverable awaiting review. In `manifest.ui.slots` we registered a slot of type `"detailTab"` for `entityTypes: ["issue"]`【13†L631-L642】. In the tab’s React component (exported as `DeliverableReviewTab`), we use the SDK’s bridge hooks: 
 
 ```jsx
+// Example plugin UI component
 import { usePluginData, usePluginAction } from "@paperclipai/plugin-sdk/ui";
-function RetrospectiveTab({ context }) {
-  const { data: retro, loading } = usePluginData("getRetrospective", { issueId: context.issueId });
-  const finalize = usePluginAction("finalizeRetrospective");
-  if (loading) return <Spinner />;
+export function DeliverableReviewTab({ context }) {
+  const { data, loading } = usePluginData("deliverableStatus", { issueId: context.issueId });
+  const approve = usePluginAction("approveDeliverable");
+  const reject = usePluginAction("rejectDeliverable");
+  if (loading) return <div>Loading...</div>;
   return (
     <div>
-      <h3>Retrospective Notes</h3>
-      <MarkdownEditor content={retro.notes} disabled={!retro.editable} />
-      <button onClick={() => finalize({ issueId: context.issueId })}>Mark Complete</button>
+      <h3>Quality Review</h3>
+      <p>Status: {data.status}</p>
+      <p>Score: {data.score}</p>
+      {/* Display checklist/results */}
+      <button onClick={() => approve({issueId: context.issueId})}>Approve</button>
+      <button onClick={() => {
+          const reason = prompt("Rejection note:");
+          reject({issueId: context.issueId, reason});
+        }}>Request Changes</button>
     </div>
   );
 }
 ```
-This pseudocode shows using `usePluginData` to fetch retrospective data and `usePluginAction` to finalize it. Actual implementation would include form fields, lists of artifacts, etc. (We assume basic components like `MarkdownEditor` from the SDK).
 
-## Worker Logic (TypeScript Pseudocode)
+This component (similar to examples【18†L1218-L1226】【21†L1079-L1083】) asks the worker for `deliverableStatus` data and calls actions. The host mounts it in the issue view. Optionally, one could add a **top-level plugin page** listing all pending reviews (using a `ui.page` slot) or a **dashboard widget** summarizing quality metrics. But for MVP, the issue detail tab is sufficient to gate each deliverable.
+
+## Worker Pseudocode (TypeScript)
 
 ```ts
+import { definePlugin, z } from "@paperclipai/plugin-sdk";
+
 export default definePlugin({
-  id: "org-learning",
+  id: "quality-gate",
   version: "0.1.0",
-  displayName: "Org Learning",
-  categories: ["automation", "ui"],
+  categories: ["automation","ui"],
   capabilities: [
-    "events.subscribe", "issues.read","issues.update","issue.comments.read","issue.comments.create",
-    "agents.read","goals.read","data.read","data.write","costs.read","activity.log.write",
+    "events.subscribe",
+    "issues.read","issues.update","issue.comments.create",
     "plugin.state.read","plugin.state.write",
-    "ui.detailTab.register", "ui.dashboardWidget.register", "instance.settings.register",
-    "jobs.schedule", "webhooks.receive", "http.outbound", "agent.tools.register"
+    "ui.detailTab.register"
   ],
-  entrypoints: { worker: "./dist/worker.js", ui: "./dist/ui" },
+  instanceConfigSchema: z.object({
+    // e.g. quality thresholds or rules
+    minScore: z.number().default(80)
+  }),
   async register(ctx) {
-    // Example: detect agent run failures
+    // 1. Subscribe to agent runs
     ctx.events.on("agent.run.finished", async (event) => {
-      const { runId, agentId, status } = event.payload;
-      if (status === "failed") {
-        // Record a deliverable for retrospective
-        const record = { runId, agentId, error: "See run logs", status: "pending_review" };
-        await ctx.entities.upsert({
+      const { runId, agentId, projectId, companyId } = event.payload;
+      // Fetch run details or output if needed (not shown)
+      // Determine associated issue/task:
+      const issueId = event.payload.issueId; // assume event carries this
+      if (!issueId) return;
+      // Evaluate deliverable (placeholder logic)
+      const score = await evaluateDeliverable(runId);
+      if (score < ctx.config.get().then(c => c.minScore)) {
+        // Mark blocked and save state
+        await ctx.issues.update({ issueId, updates: { status: "blocked" } });
+        const record = { status: "pending_review", score, logs: [] };
+        await ctx.state.set({
           pluginId: ctx.manifest.id,
-          entityType: "deliverable",
-          scopeKind: "run", scopeId: runId,
-          externalId: null, title: `Run ${runId} failure`,
-          status: "pending_review", dataJson: record
+          scopeKind: "issue",
+          scopeId: issueId,
+          namespace: "deliverable",
+          stateKey: "review"
+        }, record);
+        await ctx.issues.comment.create({
+          issueId,
+          content: `Quality gate: score ${score}. Awaiting human review.`
         });
-        ctx.activity.log.write({ actor_type: "plugin", actor_id: ctx.manifest.id, message: `Captured run ${runId} failure for review` });
       }
     });
 
-    // Scheduled job: weekly retrospective
-    ctx.jobs.register("weekly-retrospective", { cron: "0 0 * * MON" }, async () => {
-      const retros = await ctx.tools.execute("summarize-runs", {});
-      // Save retrospective artifact
-      await ctx.entities.upsert({
-        pluginId: ctx.manifest.id,
-        entityType: "retrospective",
-        scopeKind: "company", scopeId: event.companyId,
-        title: `Weekly Retrospective ${new Date().toISOString().slice(0,10)}`,
-        status: "draft", dataJson: { notes: retros }
-      });
+    // 2. Approve action
+    ctx.actions.register("approveDeliverable", async ({issueId}) => {
+      const stateKey = { pluginId: ctx.manifest.id, scopeKind:"issue", scopeId:issueId, namespace:"deliverable", stateKey:"review" };
+      const data = await ctx.state.get(stateKey) as any;
+      if (data && data.status === "pending_review") {
+        data.status = "approved";
+        data.logs.push({ action: "approved", time: new Date().toISOString() });
+        await ctx.state.set(stateKey, data);
+        await ctx.issues.update({ issueId, updates: { status: "done" }});
+        await ctx.activity.log.write({ message: `Deliverable ${issueId} approved.` });
+      }
     });
 
-    // UI Data: get retrospective by issue (or company context)
-    ctx.data.register("getRetrospective", async ({ issueId }) => {
-      // find retrospective linked to this issue or company
-      const list = await ctx.entities.list({ pluginId: ctx.manifest.id, entityType: "retrospective", scopeId: issueId });
-      return list[0]?.dataJson || { notes: "", editable: true };
+    // 3. Reject action (request revision)
+    ctx.actions.register("rejectDeliverable", async ({issueId, reason}) => {
+      const stateKey = { pluginId: ctx.manifest.id, scopeKind:"issue", scopeId:issueId, namespace:"deliverable", stateKey:"review" };
+      const data = await ctx.state.get(stateKey) as any;
+      if (data && data.status === "pending_review") {
+        data.status = "needs_revision";
+        data.rejection = reason || "";
+        data.logs.push({ action: "rejected", reason, time: new Date().toISOString() });
+        await ctx.state.set(stateKey, data);
+        // Allow agent to fix: set back to ToDo or In Progress
+        await ctx.issues.update({ issueId, updates: { status: "todo" }});
+        await ctx.issues.comment.create({
+          issueId,
+          content: `Deliverable needs revision: ${reason}`
+        });
+      }
     });
 
-    // UI Action: finalize retrospective
-    ctx.actions.register("finalizeRetrospective", async ({ issueId }) => {
-      const key = { pluginId: ctx.manifest.id, entityType: "retrospective", scopeKind:"issue", scopeId: issueId };
-      await ctx.entities.upsert({ ...key, status: "completed" });
-      ctx.activity.log.write({ actor_type: "plugin", actor_id: ctx.manifest.id, message: `Retrospective for issue ${issueId} completed` });
-    });
-
-    // Agent Tool: query playbooks
-    ctx.tools.register("get-playbooks", { displayName: "Get Playbooks", description: "Fetch relevant playbooks", parametersSchema: {} }, async (params, runCtx) => {
-      const playbooks = await ctx.entities.list({ pluginId: ctx.manifest.id, entityType: "playbook", scopeKind:"company", scopeId: runCtx.companyId });
-      return { content: JSON.stringify(playbooks.map(p => p.dataJson)) };
+    // 4. Provide data to UI
+    ctx.data.register("deliverableStatus", async ({ issueId }) => {
+      const key = { pluginId: ctx.manifest.id, scopeKind:"issue", scopeId:issueId, namespace:"deliverable", stateKey:"review" };
+      const rec = await ctx.state.get(key) as any;
+      return rec || { status: "none", score: null };
     });
   }
 });
 ```
 
-This pseudocode illustrates handlers for events, jobs, data/actions, and tools. It records failures as `deliverable` entities, schedules a job to create a `retrospective`, and provides UI integration. All data writes use the SDK (`ctx.entities`, `ctx.activities`, etc.). We log actions with `actor_type = plugin`.
+This pseudocode shows the main logic. It assumes `agent.run.finished` events include an `issueId`. On low score it blocks the task and saves state. The UI actions read/update that state. All state writes use `ctx.state` and all issue changes use `ctx.issues` APIs (which require the declared capabilities【32†L1029-L1036】). This keeps core governance intact (the plugin never grants a task “permission” it shouldn’t have; it just uses normal issue updates and comments).
 
-## Event Flow Diagram (Mermaid)
+## Architectural Notes & Risks
 
-```mermaid
-flowchart TD
-    A[agent.run.finished] --> B{status}
-    B -- "failed" --> C[Capture failure deliverable]
-    C --> D[Create plugin_entity deliverable]
-    D --> E[ctx.activity.log: logged]
-    E --> F[Retrospective job scheduled]
-    F --> G[Retrospective entry in plugin_entities]
-    G --> H[Plugin UI shows draft retrospective]
-    H --> I[User edits & approves]
-    I --> J[plugin_entity playbook created]
-    J --> K[Future agent.run uses playbook via tool]
-```
+- **Event Payloads:** Currently, `issue.created` events include limited data (title/identifier only)【52†L225-L233】, so plugin may need to fetch full issue details via API. The same may apply to `agent.run.finished`. We may rely on context (like event payload or context object) to get `issueId`. Some adapter implementations may be needed to surface the deliverable content to the plugin.  
+- **Approval vs. Task States:** We avoid using Paperclip’s built-in *Approval* objects (which are designed for hires/strategy) and instead use task status and plugin state. This means board members approve via the plugin UI, not the core approvals list. This sidesteps forbidden “approval.decide” capabilities【32†L1067-L1075】. However, it also means approvals won’t appear in the global Approvals UI. If integration with core approvals is needed, the plugin could POST to the core API (with `http.outbound`) to create an approval request of a custom type – but that lies outside MVP scope.  
+- **Persistent State:** We use `ctx.state` for simplicity. For richer queries or multiple fields, a plugin could also use `ctx.entities.upsert` (plugin-owned database records) to store each deliverable record. But for MVP, `ctx.state` suffices【32†L1039-L1043】.  
+- **Concurrency & Retries:** The plugin must handle “at least once” events【16†L845-L853】, so handlers should be idempotent. For example, checking if state already exists before re-applying. We should ensure the same deliverable isn’t processed twice.  
+- **UI Trust Model:** Note that plugin UI runs as trusted code (same origin)【10†L285-L294】, so we can rely on it calling our `performAction` and `getData`. We need not sandbox the UI.  
 
-## Implementation & MVP Plan
+In summary, the plugin-based design cleanly uses Paperclip’s extension points. The manifest ties together the worker and UI. The worker listens to domain events, mutates tasks and state, and the UI presents the review interface. This achieves a “universal external-deliverable gate” without modifying core code, using only supported plugin capabilities【13†L609-L618】【32†L1039-L1043】.
 
-1. **Setup:** Use `@paperclipai/plugin-sdk`. Scaffold via `definePlugin`. Use `create-paperclip-plugin` (if available) to initialize boilerplate.  
-2. **Manifest:** As outlined above, fill in `id`, `version`, `capabilities`, `tools`, `webhooks` (if needed), `slots`. E.g. `webhooks: [{ key: "slack", path: "/slack" }]` to receive Slack callbacks. Include `tools` for any agent API.  
-3. **Worker Code:** Implement handlers for a subset of axes: e.g. detection of deliverables (`agent.run.finished`), a `ctx.jobs.register` for retrospectives, and `ctx.actions.register` for finalizing. Use `ctx.entities` to store structured data.  
-4. **UI Code:** Add React components. For MVP, create a detail tab for tasks (e.g. showing review status and actions) and a dashboard widget (showing number of pending reviews, learnings summary). Use `usePluginData`/`usePluginAction` hooks to connect with worker.  
-5. **Local Dev/Test:** Use `@paperclipai/plugin-test-harness` (when available) to simulate events. Write unit tests emitting synthetic events and verifying `ctx.state` or `ctx.entities` changes【21†L1079-L1083】. Run a local Paperclip instance (Docker) and load the plugin.  
-6. **MVP Scope (Prioritized):**  
-   - **Phase 1:** Detect deliverables (from `agent.run.finished`), store in plugin state, block tasks, simple UI with approve/reject.  
-   - **Phase 2:** Add feedback loop: scheduled job to aggregate metrics, UI for dashboards/scorecards.  
-   - **Phase 3:** Knowledge artifacts: allow creation of knowledge entries and playbooks with board review. Add agent tool for querying knowledge.  
-   - **Phase 4:** External integration: webhooks (e.g. Slack notifications) and advanced embeddings search.
-
-7. **Observability:** Use `ctx.activity.log.write` for each action. Expose metrics (e.g. number of reviews done) via host metrics.  
-8. **Concurrency/Idempotency:** Use filters on events (by projectId/companyId) to limit scope. In handlers, check if an entity already exists before upserting to avoid duplicates. Leverage host job deduplication (no overlapping jobs)【18†L1166-L1170】.
-
-### Local Dev/Test Setup
-
-- **Plugin Test Harness:** A mock host to test `register(ctx)` logic without a full Paperclip instance. Emit synthetic events: 
-  ```js
-  await harness.emit("agent.run.finished", { runId: "r1", agentId: "a1", status: "failed", projectId: "p1", companyId: "c1" });
-  ```
-  Then inspect `harness.getState(scope)` or `harness.entities.list(...)`.  
-- **Local Paperclip Instance:** Follow Paperclip local deployment docs. Enable plugin runtime. Use CLI `pnpm paperclipai plugin install` to load the plugin code (built via `npm run build`).  
-- **Iterate:** Edit code, rebuild, and hot-reload plugin (supported by system【60†L1784-L1793】). Use sample company and agents to simulate runs and verify UI/DB changes.
-
-## References and Sources
-
-This design is grounded in Paperclip’s plugin architecture【13†L609-L618】【60†L1619-L1630】. We employ event subscriptions, state storage, and UI slots as specified in the Paperclip Plugin Spec【57†L748-L756】【32†L1045-L1053】. The sample flows and manifest fields mirror existing plugins (e.g. GitHub sync plugin【62†L310-L318】). All data writes go through the Paperclip SDK (`ctx.*`), ensuring governance and audit (plugin actor logging)【60†L1648-L1656】. Detailed internals (event payloads, DB schema) are taken from the Paperclip docs cited above. Any unspecified behaviors (like exact LLM calls) are noted as assumptions.
-
+**Sources:** Paperclip Plugin SDK & Spec【13†L609-L618】【32†L1029-L1036】【21†L1023-L1030】【18†L1102-L1105】【41†L204-L212】.
