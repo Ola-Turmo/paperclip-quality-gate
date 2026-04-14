@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "npm run plugin:build",
     "plugin:typecheck": "tsc --noEmit",
     "plugin:build": "node esbuild.config.mjs"
   },
