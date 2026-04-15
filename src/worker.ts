@@ -1,757 +1,809 @@
-import type { PluginContext, PluginEvent, PluginEventType } from "@paperclipai/plugin-sdk";
+import {
+  definePlugin,
+  runWorker,
+  type PluginContext,
+  type PluginEvent,
+  type Issue,
+  type ToolResult,
+} from "@paperclipai/plugin-sdk";
+import {
+  DEFAULT_CONFIG,
+  PLUGIN_ID,
+  PLUGIN_VERSION,
+} from "./manifest.js";
 import type {
   ActionResult,
+  AgentRunFinishedEvent,
   ApproveParams,
-  IssueStatus,
-  QualityGateReviewInput,
+  IssueCreatedEvent,
+  IssueUpdatedEvent,
+  QualityGateSettings,
   RejectParams,
-  ReviewHistoryData,
-  ReviewStatusData,
+  ReviewsListData,
   SubmitForReviewParams,
 } from "./types.js";
-import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 import {
+  buildApproveComment,
+  buildAutoRejectComment,
   buildNewReview,
-  evaluateDeliverable,
-  getConfig,
-  getReview,
-  putReview,
+  buildRejectComment,
+  buildSubmitComment,
+  evaluateQuality,
+  mapTargetStatus,
+  STATE_KEYS,
   updateReviewStatus,
 } from "./helpers.js";
+import type { DeliverableReview, ReviewStatus, ReviewStatusData } from "./types.js";
 
-// =============================================================================
-// Types for raw event payloads (SDK doesn't export typed event payloads)
-// =============================================================================
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-interface IssuePayload {
-  issue?: {
-    id?: string;
-    title?: string;
-    status?: string;
+async function getConfig(ctx: PluginContext): Promise<QualityGateSettings> {
+  const config = await ctx.config.get();
+  return { ...DEFAULT_CONFIG, ...(config as Partial<QualityGateSettings>) };
+}
+
+async function getReview(
+  ctx: PluginContext,
+  issueId: string,
+): Promise<DeliverableReview | null> {
+  const review = await ctx.state.get({
+    scopeKind: "issue" as const,
+    scopeId: issueId,
+    stateKey: STATE_KEYS.REVIEWS,
+  });
+  return (review as DeliverableReview | null) ?? null;
+}
+
+async function putReview(
+  ctx: PluginContext,
+  review: DeliverableReview,
+): Promise<void> {
+  // Per-issue atomic state — concurrent writes on different issues never contend.
+  await ctx.state.set(
+    { scopeKind: "issue" as const, scopeId: review.issueId, stateKey: STATE_KEYS.REVIEWS },
+    review,
+  );
+  // Maintain a company-level index of review IDs for list queries
+  const indexKey = {
+    scopeKind: "company" as const,
+    scopeId: review.companyId,
+    stateKey: STATE_KEYS.REVIEW_IDS,
   };
+  const ids = ((await ctx.state.get(indexKey)) as string[] | null) ?? [];
+  const next = ids.includes(review.id)
+    ? ids
+    : [review.id, ...ids].slice(0, 200);
+  await ctx.state.set(indexKey, next);
 }
 
-interface CommentPayload {
-  issue?: { id?: string };
-  comment?: {
-    id?: string;
-    body?: string;
-    authorUserId?: string | null;
-    authorAgentId?: string | null;
-  };
-}
-
-interface AgentRunFinishedPayload {
-  runId?: string;
-  agentId?: string;
-  issueId?: string;
-  projectId?: string;
-  companyId?: string;
-  outputUrl?: string;
-  status?: string;
-  [key: string]: unknown;
-}
-
-type IssueEvent = PluginEvent<IssuePayload>;
-type CommentEvent = PluginEvent<CommentPayload>;
-type AgentRunFinishedEvent = PluginEvent<AgentRunFinishedPayload>;
-
-// =============================================================================
-// Comment text builders
-// =============================================================================
-
-function buildSubmitComment(review: {
-  qualityScore?: number;
-  evaluationSummary?: string;
-  blockApproval: boolean;
-  qualityChecks?: { category: string; score: number; message?: string }[];
-}): string {
-  const lines = [
-    "## 📋 Quality Gate — Submitted for Review",
-  ];
-  if (review.qualityScore !== undefined) {
-    lines.push(`**Quality Score:** ${review.qualityScore}/10`);
-  }
-  if (review.evaluationSummary) {
-    lines.push(`**Evaluation:** ${review.evaluationSummary}`);
-  }
-  if (review.blockApproval) {
-    lines.push("\n⚠️ **Note:** Agent flagged a known limitation — review required before approval.");
-  }
-  if (review.qualityChecks && review.qualityChecks.length > 0) {
-    lines.push("\n**Category Breakdown:**");
-    for (const check of review.qualityChecks) {
-      lines.push(`- **${check.category}:** ${check.score}/10 — ${check.message ?? ""}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function buildApproveComment(comment?: string): string {
-  const lines = ["## ✅ Quality Gate — Approved"];
-  if (comment) lines.push(`\n> ${comment}`);
-  return lines.join("\n");
-}
-
-function buildRejectComment(comment: string): string {
-  return [
-    "## ❌ Quality Gate — Changes Requested",
-    "",
-    `> ${comment}`,
-    "",
-    "Please address the feedback above and resubmit for review.",
-  ].join("\n");
-}
-
-// =============================================================================
-// Issue status helpers
-// =============================================================================
-
-/** Map our internal review status to Paperclip issue status. */
-function getTargetIssueStatus(review: {
-  status: string;
-  blockThresholdBreached?: boolean;
-  autoRejected?: boolean;
-}): string {
-  if (review.blockThresholdBreached) return "blocked";
-  if (review.autoRejected) return "in_progress";
-  switch (review.status) {
-    case "approved":
-      return "done";
-    case "rejected":
-      return "in_progress";
-    case "pending_review":
-      return "in_review";
-    default:
-      return "in_review";
-  }
-}
-
-// =============================================================================
-// Plugin Definition
-// =============================================================================
+// ── Worker ────────────────────────────────────────────────────────────────────
 
 const plugin = definePlugin({
-  async setup(ctx: PluginContext) {
-    ctx.logger.info("uos-quality-gate plugin starting");
+  async setup(ctx) {
+    ctx.logger.info(`${PLUGIN_ID} v${PLUGIN_VERSION} starting up`);
 
-    // -------------------------------------------------------------------------
-    // Tool: quality_gate_review
-    // -------------------------------------------------------------------------
-    ctx.tools.register(
-      "quality_gate_review",
-      {
-        displayName: "Quality Gate Review",
-        description:
-          "Submit a deliverable for quality review. Evaluates quality across " +
-          "completeness, correctness, clarity, test coverage, and documentation. " +
-          "Auto-rejects scores below the configured threshold. " +
-          "Flags for human review if block_approval=true or score is below minimum.",
-        parametersSchema: {
-          type: "object",
-          required: ["issue_id"],
-          properties: {
-            issue_id: {
-              type: "string",
-              description: "UUID of the issue this deliverable belongs to.",
-            },
-            deliverable_summary: {
-              type: "string",
-              description:
-                "Plain-text summary of what was delivered — changes made, " +
-                "files modified, decisions taken.",
-            },
-            quality_score: {
-              type: "number",
-              minimum: 0,
-              maximum: 10,
-              description:
-                "Self-assessed overall quality score (0–10). " +
-                "Below the configured minimum (default 7) triggers review.",
-            },
-            block_approval: {
-              type: "boolean",
-              description:
-                "Set to true when there is a known limitation or open question " +
-                "that should prevent automatic approval pending human review.",
-            },
-            self_assessment: {
-              type: "object",
-              description:
-                "Optional per-category self-assessment. " +
-                "enables more accurate quality evaluation than a single score.",
-              properties: {
-                completeness: {
-                  type: "number",
-                  minimum: 0,
-                  maximum: 10,
-                  description: "Coverage of all required scope items.",
-                },
-                correctness: {
-                  type: "number",
-                  minimum: 0,
-                  maximum: 10,
-                  description: "Likeliness of being bug-free and logically correct.",
-                },
-                clarity: {
-                  type: "number",
-                  minimum: 0,
-                  maximum: 10,
-                  description: "How clear and self-explanatory the deliverable is.",
-                },
-                test_coverage: {
-                  type: "number",
-                  minimum: 0,
-                  maximum: 10,
-                  description: "Adequacy of tests covering the deliverable.",
-                },
-                documentation: {
-                  type: "number",
-                  minimum: 0,
-                  maximum: 10,
-                  description: "Quality of accompanying documentation.",
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-          additionalProperties: false,
-        },
-      },
-      async (params: unknown): Promise<{ content?: string; data?: unknown; error?: string }> => {
-        const p = params as QualityGateReviewInput;
-        const { issue_id, deliverable_summary, quality_score, block_approval, self_assessment } = p;
+    // ── Data registrations ────────────────────────────────────────────────────
 
-        ctx.logger.info("quality_gate_review called", { issueId: issue_id });
+    ctx.data.register("quality_gate.config", async () => {
+      return await getConfig(ctx);
+    });
 
-        const cfg = await getConfig(ctx);
-        const existing = await getReview(ctx, issue_id);
+    ctx.data.register("quality_gate.review", async (params) => {
+      const issueId = params["issueId"] as string;
+      if (!issueId) return null;
 
-        if (existing && existing.status !== "pending_review") {
-          return {
-            content: `Deliverable is already ${existing.status}.`,
-            data: {
-              success: true,
-              review: existing,
-              evaluation: {
-                overallScore: existing.qualityScore ?? 0,
-                passed: existing.status === "approved",
-                autoRejected: false,
-                blockThresholdBreached: false,
-                checks: existing.qualityChecks ?? [],
-                blockers: [],
-                summary: `Already ${existing.status}.`,
-              },
-            },
-          };
-        }
+      let review: DeliverableReview | null = null;
+      try {
+        review = await getReview(ctx, issueId);
+      } catch {
+        return null;
+      }
+      if (!review) return null;
 
-        const evaluation = evaluateDeliverable({
-          qualityScore: quality_score,
-          blockApproval: block_approval,
-          selfAssessment: self_assessment,
-          config: cfg,
-        });
-
-        const review = existing
-          ? updateReviewStatus(existing, "pending_review", {
-              action: "re-submitted for review",
-              reviewer: "agent",
-              reviewerName: "Agent",
-              comment: deliverable_summary,
-              qualityScore: evaluation.overallScore,
-              auto: false,
-            })
-          : buildNewReview({
-              issueId: issue_id,
-              companyId: "",
-              summary: deliverable_summary,
-              qualityScore: evaluation.overallScore,
-              blockApproval: block_approval ?? false,
-              reviewerName: "Agent",
-              qualityChecks: evaluation.checks,
-              evaluationSummary: evaluation.summary,
-            });
-
-        await putReview(ctx, review);
-
+      let issue: Issue | null = null;
+      try {
         if (review.companyId) {
-          try {
-            await ctx.issues.createComment(issue_id, buildSubmitComment({
-                qualityScore: evaluation.overallScore,
-                evaluationSummary: evaluation.summary,
-                blockApproval: block_approval ?? false,
-                qualityChecks: evaluation.checks,
-              }), review.companyId);
-          } catch (err) {
-            ctx.logger.warn("Failed to post submit comment", { error: String(err) });
-          }
+          issue = await ctx.issues.get(issueId, review.companyId);
         }
+      } catch {
+        // issue may have been deleted — return review without issue
+      }
 
-        // Set issue to in_review
-        if (review.companyId) {
-          try {
-            await ctx.issues.update(issue_id, { status: "in_review" }, review.companyId);
-          } catch (err) {
-            ctx.logger.warn("Failed to update issue status to in_review", { error: String(err) });
-          }
-        }
+      const data: ReviewStatusData = { review };
+      if (issue) {
+        data.issue = { id: issue.id, title: issue.title, status: issue.status ?? undefined };
+      }
+      return data;
+    });
 
-        // Auto-reject very low scores without human review
-        if (evaluation.autoRejected) {
-          const autoReview = updateReviewStatus(review, "rejected", {
-            action: `auto-rejected (score ${evaluation.overallScore} below ${cfg.autoRejectBelow})`,
-            reviewer: "agent",
-            reviewerName: "System",
-            comment: evaluation.summary,
-            qualityScore: evaluation.overallScore,
-            auto: true,
-          });
-          await putReview(ctx, autoReview);
+    ctx.data.register("quality_gate.reviews", async (params) => {
+      const companyId = (params["companyId"] as string) ?? "";
+      if (!companyId) return { reviews: [], total: 0 };
 
-          if (autoReview.companyId) {
-            try {
-              await ctx.issues.update(issue_id, { status: "in_progress" }, autoReview.companyId);
-              await ctx.issues.createComment(issue_id, buildRejectComment(evaluation.summary), autoReview.companyId);
-            } catch (err) {
-              ctx.logger.warn("Failed auto-reject update", { error: String(err) });
-            }
-          }
+      const ids = ((await ctx.state.get({
+        scopeKind: "company" as const,
+        scopeId: companyId,
+        stateKey: STATE_KEYS.REVIEW_IDS,
+      })) as string[] | null) ?? [];
 
-          ctx.streams.emit("review_updated", {
-            issueId: autoReview.issueId,
-            review: autoReview,
-          });
+      const reviews: ReviewStatusData[] = [];
+      for (const reviewId of ids.slice(0, 50)) {
+        const parts = reviewId.split("_");
+        const issueId = parts[1];
+        if (!issueId) continue;
 
-          return { content: evaluation.summary, data: { success: true, review: autoReview, evaluation } };
-        }
-
-        // blockThresholdBreached → set issue to blocked
-        if (evaluation.blockThresholdBreached) {
-          const blockedReview = updateReviewStatus(review, "pending_review", {
-            action: `blocked — score ${evaluation.overallScore} below block threshold (${cfg.blockThreshold})`,
-            reviewer: "agent",
-            reviewerName: "System",
-            comment: evaluation.summary,
-            qualityScore: evaluation.overallScore,
-            auto: true,
-          });
-          blockedReview.autoRejected = false;
-          await putReview(ctx, blockedReview);
-
-          if (blockedReview.companyId) {
-            try {
-              await ctx.issues.update(issue_id, { status: "blocked" }, blockedReview.companyId);
-            } catch (err) {
-              ctx.logger.warn("Failed to set issue to blocked", { error: String(err) });
-            }
-          }
-
-          ctx.streams.emit("review_updated", {
-            issueId: blockedReview.issueId,
-            review: blockedReview,
-          });
-
-          return { content: evaluation.summary, data: { success: true, review: blockedReview, evaluation } };
-        }
-
-        ctx.streams.emit("review_updated", {
-          issueId: review.issueId,
-          review,
-        });
-
-        return { content: evaluation.summary, data: { success: true, review, evaluation } };
-      },
-    );
-
-    // -------------------------------------------------------------------------
-    // Action: submit_for_review
-    // -------------------------------------------------------------------------
-    ctx.actions.register(
-      "submit_for_review",
-      async (params: Record<string, unknown>): Promise<{ ok: boolean; review?: unknown; evaluation?: unknown; error?: string }> => {
-        const p = params as unknown as SubmitForReviewParams;
-        const cfg = await getConfig(ctx);
-        const issueId = p.issue_id as string;
-
-        let companyId = "";
         try {
-          const issue = await ctx.issues.get(issueId, "");
-          if (issue) companyId = issue.companyId ?? "";
+          const review = await getReview(ctx, issueId);
+          if (!review) continue;
+          let issue: Issue | null = null;
+          try {
+            issue = await ctx.issues.get(issueId, companyId);
+          } catch {
+            // issue deleted — still surface the review
+          }
+          reviews.push({
+            review,
+            issue: issue ? { id: issue.id, title: issue.title, status: issue.status ?? "" } : undefined,
+          });
         } catch {
-          // fallback: use empty string
+          // skip corrupted review
         }
+      }
 
-        // Run full quality evaluation to determine correct status
-        const evaluation = evaluateDeliverable({
-          qualityScore: p.quality_score as number | undefined,
-          blockApproval: p.block_approval ?? false,
-          config: cfg,
+      return { reviews, total: ids.length } as ReviewsListData;
+    });
+
+    // ── Action registrations ─────────────────────────────────────────────────
+
+    /**
+     * quality_gate.submit — evaluate a deliverable and create/update a review.
+     * Idempotent: submitting the same issue again updates the existing review.
+     */
+    ctx.actions.register("quality_gate.submit", async (params) => {
+      const p = params as unknown as SubmitForReviewParams;
+      const issueId = p.issue_id;
+      if (!issueId) {
+        return { ok: false, error: "issue_id is required" } as ActionResult;
+      }
+
+      const cfg = await getConfig(ctx);
+
+      let companyId = "";
+      let existingReview: DeliverableReview | null = null;
+      try {
+        const issue = await ctx.issues.get(issueId, "");
+        companyId = issue?.companyId ?? "";
+        if (companyId) {
+          existingReview = await getReview(ctx, issueId);
+        }
+      } catch (err) {
+        ctx.logger.warn("quality_gate.submit: could not load issue", { issueId, error: String(err) });
+        return { ok: false, error: "Issue not found" } as ActionResult;
+      }
+
+      const evaluation = evaluateQuality(
+        p.quality_score,
+        p.block_approval ?? false,
+        cfg,
+      );
+
+      let reviewStatus: ReviewStatus = "pending_review";
+      if (evaluation.autoRejected) {
+        reviewStatus = "auto_rejected";
+      } else if (evaluation.blockThresholdBreached) {
+        reviewStatus = "needs_human_review";
+      }
+
+      let review: DeliverableReview;
+      if (existingReview) {
+        review = updateReviewStatus(existingReview, reviewStatus, {
+          action: "resubmitted",
+          reviewer: "user",
+          reviewerName: "User",
+          comment: p.comment,
+          qualityScore: evaluation.overallScore,
+          auto: false,
         });
-
-        let review = buildNewReview({
+      } else {
+        review = buildNewReview({
           issueId,
           companyId,
-          summary: p.summary as string | undefined,
+          summary: p.summary,
           qualityScore: evaluation.overallScore,
           blockApproval: p.block_approval ?? false,
           reviewerName: "User",
           qualityChecks: evaluation.checks,
           evaluationSummary: evaluation.summary,
         });
+      }
 
-        // Determine target issue status based on evaluation outcome
-        let targetStatus = "in_review";
-        if (evaluation.autoRejected) {
-          // Score below autoRejectBelow — set back to in_progress (agent should fix)
-          review = updateReviewStatus(review, "rejected", {
-            action: `auto-rejected (score ${evaluation.overallScore} < ${cfg.autoRejectBelow})`,
-            reviewer: "agent",
-            reviewerName: "System",
-            comment: evaluation.summary,
-            qualityScore: evaluation.overallScore,
-            auto: true,
+      await putReview(ctx, review);
+
+      const targetStatus = mapTargetStatus(evaluation.category);
+
+      if (companyId && targetStatus) {
+        try {
+          await ctx.issues.update(
+            issueId,
+            { status: targetStatus as Issue["status"] },
+            companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.submit: failed to update issue status", { error: String(err) });
+        }
+        try {
+          await ctx.issues.createComment(
+            issueId,
+            buildSubmitComment({
+              qualityScore: evaluation.overallScore,
+              evaluationSummary: evaluation.summary,
+              blockApproval: p.block_approval,
+              qualityChecks: evaluation.checks,
+            }),
+            companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.submit: failed to post comment", { error: String(err) });
+        }
+      }
+
+      ctx.streams.emit("quality_gate.review_updated", { review });
+
+      if (evaluation.autoRejected) {
+        ctx.streams.emit("quality_gate.threshold_breached", {
+          review,
+          score: evaluation.overallScore,
+          reason: "auto_rejected",
+        });
+      } else if (evaluation.blockThresholdBreached) {
+        ctx.streams.emit("quality_gate.threshold_breached", {
+          review,
+          score: evaluation.overallScore,
+          reason: "block_threshold",
+        });
+      }
+
+      ctx.logger.info("quality_gate.submit: review created/updated", {
+        issueId,
+        status: reviewStatus,
+        score: evaluation.overallScore,
+        category: evaluation.category,
+      });
+
+      return { ok: true, review } as ActionResult<DeliverableReview>;
+    });
+
+    /**
+     * quality_gate.approve — approve a deliverable (human reviewer).
+     * Idempotent: double-approve is a no-op, not an error.
+     */
+    ctx.actions.register("quality_gate.approve", async (params) => {
+      const p = params as unknown as ApproveParams;
+      const issueId = p.issue_id;
+      if (!issueId) {
+        return { ok: false, error: "issue_id is required" } as ActionResult;
+      }
+
+      const review = await getReview(ctx, issueId);
+      if (!review) {
+        return { ok: false, error: "No review found for this issue" } as ActionResult;
+      }
+
+      if (review.status === "approved") {
+        return { ok: true, review, message: "Already approved" } as ActionResult<DeliverableReview>;
+      }
+
+      const updated = updateReviewStatus(review, "approved", {
+        action: "approved",
+        reviewer: "user",
+        reviewerName: "Reviewer",
+        comment: p.comment,
+        auto: false,
+      });
+      await putReview(ctx, updated);
+
+      if (updated.companyId) {
+        try {
+          await ctx.issues.update(
+            issueId,
+            { status: "done" as Issue["status"] },
+            updated.companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.approve: failed to update issue", { error: String(err) });
+        }
+        try {
+          await ctx.issues.createComment(
+            issueId,
+            buildApproveComment(p.comment),
+            updated.companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.approve: failed to post comment", { error: String(err) });
+        }
+        try {
+          await ctx.activity.log({
+            companyId: updated.companyId,
+            message: `Quality gate approved for issue ${issueId}`,
+            entityType: "issue",
+            entityId: issueId,
           });
-          targetStatus = "in_progress";
+        } catch {
+          // activity not available
+        }
+        try {
+          await ctx.metrics.write("quality_gate.reviews.approved", 1, {
+            companyId: updated.companyId,
+          });
+        } catch {
+          // metrics not available
+        }
+      }
+
+      ctx.streams.emit("quality_gate.review_approved", { review: updated });
+
+      ctx.logger.info("quality_gate.approve: issue approved", { issueId });
+      return { ok: true, review: updated } as ActionResult<DeliverableReview>;
+    });
+
+    /**
+     * quality_gate.reject — reject a deliverable (human reviewer).
+     * Idempotent: double-reject is a no-op.
+     */
+    ctx.actions.register("quality_gate.reject", async (params) => {
+      const p = params as unknown as RejectParams;
+      const issueId = p.issue_id;
+      if (!issueId) {
+        return { ok: false, error: "issue_id is required" } as ActionResult;
+      }
+      if (!p.comment) {
+        return { ok: false, error: "comment is required when rejecting" } as ActionResult;
+      }
+
+      const review = await getReview(ctx, issueId);
+      if (!review) {
+        return { ok: false, error: "No review found for this issue" } as ActionResult;
+      }
+
+      if (review.status === "rejected") {
+        return { ok: true, review, message: "Already rejected" } as ActionResult<DeliverableReview>;
+      }
+
+      const updated = updateReviewStatus(review, "rejected", {
+        action: "rejected",
+        reviewer: "user",
+        reviewerName: "Reviewer",
+        comment: p.comment,
+        auto: false,
+      });
+      await putReview(ctx, updated);
+
+      if (updated.companyId) {
+        try {
+          await ctx.issues.update(
+            issueId,
+            { status: "in_progress" as Issue["status"] },
+            updated.companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.reject: failed to update issue", { error: String(err) });
+        }
+        try {
+          await ctx.issues.createComment(
+            issueId,
+            buildRejectComment(p.comment),
+            updated.companyId,
+          );
+        } catch (err) {
+          ctx.logger.warn("quality_gate.reject: failed to post comment", { error: String(err) });
+        }
+        try {
+          await ctx.activity.log({
+            companyId: updated.companyId,
+            message: `Quality gate rejected for issue ${issueId}`,
+            entityType: "issue",
+            entityId: issueId,
+          });
+        } catch {
+          // activity not available
+        }
+        try {
+          await ctx.metrics.write("quality_gate.reviews.rejected", 1, {
+            companyId: updated.companyId,
+          });
+        } catch {
+          // metrics not available
+        }
+      }
+
+      ctx.streams.emit("quality_gate.review_rejected", { review: updated });
+
+      ctx.logger.info("quality_gate.reject: issue rejected", { issueId });
+      return { ok: true, review: updated } as ActionResult<DeliverableReview>;
+    });
+
+    // ── Tool registrations ────────────────────────────────────────────────────
+
+    /**
+     * quality_gate_review — agent tool: check review status for an issue.
+     */
+    ctx.tools.register(
+      "quality_gate_review",
+      {
+        displayName: "Quality Gate — Check Review Status",
+        description:
+          "Check the quality gate review status for a Paperclip issue. " +
+          "Returns the current review state, quality score, check breakdown, " +
+          "and audit history. Does not modify any state.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            issue_id: {
+              type: "string",
+              description: "The Paperclip issue ID to check the review status for.",
+            },
+            include_checks: {
+              type: "boolean",
+              description: "If true, includes the full per-check quality breakdown. Default: false.",
+              default: false,
+            },
+          },
+          required: ["issue_id"],
+        },
+      },
+      async (params: unknown) => {
+        const p = params as { issue_id: string; include_checks?: boolean };
+        const issueId = p.issue_id;
+        if (!issueId) {
+          return { content: "Error: issue_id is required." };
+        }
+
+        const review = await getReview(ctx, issueId);
+        if (!review) {
+          return { content: `No quality gate review found for issue ${issueId}.` };
+        }
+
+        const lines = [
+          `## Quality Gate Review — ${issueId}`,
+          "",
+          `**Status:** ${review.status}`,
+          `**Score:** ${review.qualityScore}/10`,
+          `**Category:** ${review.category}`,
+          `**Submitter:** ${review.submitterName}`,
+          "",
+          `> ${review.evaluationSummary}`,
+          "",
+          `Submitted: ${new Date(review.createdAt).toLocaleString()}`,
+          `Updated: ${new Date(review.updatedAt).toLocaleString()}`,
+        ];
+
+        if (p.include_checks && review.checks.length > 0) {
+          lines.push("", "### Quality Checks");
+          for (const check of review.checks) {
+            const icon = check.passed ? "✅" : "❌";
+            lines.push(
+              `${icon} **${check.name}** — ${check.details ?? ""} (score: ${check.score})`,
+            );
+          }
+        }
+
+        if (review.history.length > 0) {
+          lines.push("", "### History");
+          for (const entry of review.history.slice(-5)) {
+            lines.push(
+              `- ${entry.createdAt.slice(0, 10)} · **${entry.action}** · ${entry.reviewerName}` +
+              (entry.comment ? ` — "${entry.comment.slice(0, 80)}"` : ""),
+            );
+          }
+        }
+
+        return { content: lines.join("\n") };
+      },
+    );
+
+    /**
+     * submit_for_review — agent tool: submit completed work for quality review.
+     */
+    ctx.tools.register(
+      "submit_for_review",
+      {
+        displayName: "Quality Gate — Submit for Review",
+        description:
+          "Submit a completed deliverable for quality gate review. " +
+          "Runs the quality evaluation, creates or updates the review record, " +
+          "and posts a comment on the issue.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            issue_id: {
+              type: "string",
+              description: "The Paperclip issue ID to submit for review.",
+            },
+            summary: {
+              type: "string",
+              description: "Brief summary of what was delivered.",
+            },
+            quality_score: {
+              type: "number",
+              description: "Self-assessed quality score from 0–10.",
+            },
+            block_approval: {
+              type: "boolean",
+              description: "If true, forces human review regardless of quality score.",
+              default: false,
+            },
+            comment: {
+              type: "string",
+              description: "Optional comment to attach to the review submission.",
+            },
+          },
+          required: ["issue_id"],
+        },
+      },
+      async (params: unknown) => {
+        const p = params as {
+          issue_id: string;
+          summary?: string;
+          quality_score?: number;
+          block_approval?: boolean;
+          comment?: string;
+        };
+        const issueId = p.issue_id;
+        if (!issueId) {
+          return { content: "Error: issue_id is required.", error: "missing_param" };
+        }
+
+        const cfg = await getConfig(ctx);
+        let companyId = "";
+        try {
+          const issue = await ctx.issues.get(issueId, "");
+          companyId = issue?.companyId ?? "";
+        } catch {
+          return { content: `Error: Issue ${issueId} not found.`, error: "not_found" };
+        }
+
+        const existingReview = await getReview(ctx, issueId);
+        const evaluation = evaluateQuality(p.quality_score, p.block_approval ?? false, cfg);
+
+        let reviewStatus: ReviewStatus = "pending_review";
+        if (evaluation.autoRejected) {
+          reviewStatus = "auto_rejected";
         } else if (evaluation.blockThresholdBreached) {
-          // Score between autoRejectBelow and blockThreshold — blocked for human review
-          targetStatus = "blocked";
-        } else if (evaluation.passed) {
-          // Score meets minimum — set to in_review for human approval
-          targetStatus = "in_review";
+          reviewStatus = "needs_human_review";
+        }
+
+        let review: DeliverableReview;
+        if (existingReview) {
+          review = updateReviewStatus(existingReview, reviewStatus, {
+            action: "resubmitted",
+            reviewer: "user",
+            reviewerName: "Agent",
+            comment: p.comment,
+            qualityScore: evaluation.overallScore,
+            auto: false,
+          });
         } else {
-          // Below minQualityScore but above blockThreshold — in_review for human review
-          targetStatus = "in_review";
+          review = buildNewReview({
+            issueId,
+            companyId,
+            summary: p.summary,
+            qualityScore: evaluation.overallScore,
+            blockApproval: p.block_approval,
+            reviewerName: "Agent",
+            qualityChecks: evaluation.checks,
+            evaluationSummary: evaluation.summary,
+          });
         }
 
         await putReview(ctx, review);
 
-        if (companyId) {
+        const targetStatus = mapTargetStatus(evaluation.category);
+
+        if (companyId && targetStatus) {
           try {
-            await ctx.issues.update(issueId, { status: targetStatus as IssueStatus }, companyId);
+            await ctx.issues.update(
+              issueId,
+              { status: targetStatus as Issue["status"] },
+              companyId,
+            );
+          } catch { /* non-fatal */ }
+          try {
             await ctx.issues.createComment(
               issueId,
               buildSubmitComment({
                 qualityScore: evaluation.overallScore,
                 evaluationSummary: evaluation.summary,
-                blockApproval: p.block_approval ?? false,
+                blockApproval: p.block_approval,
                 qualityChecks: evaluation.checks,
               }),
               companyId,
             );
-          } catch (err) {
-            ctx.logger.warn("submit_for_review: failed to update issue", { error: String(err) });
-          }
+          } catch { /* non-fatal */ }
         }
 
-        ctx.streams.emit("review_updated", { issueId: review.issueId, review });
+        const emoji = review.status === "auto_rejected" ? "⚠️"
+          : review.status === "needs_human_review" ? "🛡️"
+          : "✅";
 
-        return { ok: true, review, evaluation };
+        return {
+          content: [
+            `${emoji} Quality gate review submitted for issue ${issueId}`,
+            "",
+            `Status: ${review.status}`,
+            `Score: ${review.qualityScore}/10`,
+            `Category: ${review.category}`,
+            "",
+            review.evaluationSummary,
+          ].join("\n"),
+        };
       },
     );
 
-    // -------------------------------------------------------------------------
-    // Action: approve_deliverable
-    // -------------------------------------------------------------------------
-    ctx.actions.register(
-      "approve_deliverable",
-      async (params: Record<string, unknown>): Promise<ActionResult> => {
-        const p = params as unknown as ApproveParams;
-        const review = await getReview(ctx, p.issue_id);
-        if (!review) {
-          return { ok: false, error: "No review found for this issue." };
-        }
+    // ── Event subscriptions ─────────────────────────────────────────────────
 
-        // Idempotency: already approved is a no-op, not an error
-        if (review.status === "approved") {
-          return { ok: true, review, message: "Already approved." };
-        }
+    /**
+     * agent.run.finished — auto-evaluate after agent run completes.
+     * Runs quality evaluation and creates/updates review automatically.
+     * Does NOT auto-reject or auto-approve — always sets in_review or needs_human_review.
+     */
+    ctx.events.on("agent.run.finished", async (event: PluginEvent) => {
+      const runId = event.entityId ?? "";
+      const companyId = event.companyId ?? "";
+      const payload = event.payload as unknown as AgentRunFinishedEvent;
+      const { agentId, status, summary, qualityScore, blockApproval } = payload;
 
-        const updated = updateReviewStatus(review, "approved", {
-          action: "approved",
-          reviewer: "user",
-          reviewerName: "Reviewer",
-          comment: p.comment,
-          auto: false,
-        });
+      if (!runId || !companyId) {
+        ctx.logger.info("agent.run.finished: missing runId or companyId, skipping", { runId, companyId });
+        return;
+      }
 
-        await putReview(ctx, updated);
+      if (status === "failed") {
+        ctx.logger.info("agent.run.finished: run failed, skipping auto-gate", { runId, status });
+        return;
+      }
 
-        if (updated.companyId) {
-          try {
-            await ctx.issues.update(p.issue_id, { status: "done" }, updated.companyId);
-            await ctx.issues.createComment(p.issue_id, buildApproveComment(p.comment), updated.companyId);
-          } catch (err) {
-            ctx.logger.warn("approve_deliverable: failed to update issue", { error: String(err) });
-          }
-        }
+      // Find the issue this run was for
+      let issueId = "";
+      try {
+        const issues = await ctx.issues.list({ companyId, limit: 50 });
+        const matched = issues.find(
+          (issue) =>
+            (issue as { executionRunId?: string; checkoutRunId?: string }).executionRunId === runId ||
+            (issue as { executionRunId?: string; checkoutRunId?: string }).checkoutRunId === runId,
+        );
+        issueId = matched?.id ?? "";
+      } catch (err) {
+        ctx.logger.warn("agent.run.finished: failed to list issues", { error: String(err) });
+      }
 
-        ctx.streams.emit("review_updated", { issueId: updated.issueId, review: updated });
+      if (!issueId) {
+        ctx.logger.info("agent.run.finished: no issue found for this runId, skipping", { runId });
+        return;
+      }
 
-        return { ok: true, review: updated };
-      },
-    );
+      const cfg = await getConfig(ctx);
+      const evaluation = evaluateQuality(qualityScore, blockApproval ?? false, cfg);
 
-    // -------------------------------------------------------------------------
-    // Action: reject_deliverable
-    // -------------------------------------------------------------------------
-    ctx.actions.register(
-      "reject_deliverable",
-      async (params: Record<string, unknown>): Promise<ActionResult> => {
-        const p = params as unknown as RejectParams;
-        const review = await getReview(ctx, p.issue_id);
-        if (!review) {
-          return { ok: false, error: "No review found for this issue." };
-        }
+      // Check if review already exists
+      let review = await getReview(ctx, issueId);
+      const isResubmission = review !== null;
 
-        // Idempotency: already rejected → no-op (don't re-comment or reset status)
-        if (review.status === "rejected") {
-          return { ok: true, review, message: "Already rejected." };
-        }
-
-        const updated = updateReviewStatus(review, "rejected", {
-          action: "rejected",
-          reviewer: "user",
-          reviewerName: "Reviewer",
-          comment: p.comment,
-          auto: false,
-        });
-
-        await putReview(ctx, updated);
-
-        if (updated.companyId) {
-          try {
-            await ctx.issues.update(p.issue_id, { status: "in_progress" }, updated.companyId);
-            await ctx.issues.createComment(p.issue_id, buildRejectComment(p.comment), updated.companyId);
-          } catch (err) {
-            ctx.logger.warn("reject_deliverable: failed to update issue", { error: String(err) });
-          }
-        }
-
-        ctx.streams.emit("review_updated", { issueId: updated.issueId, review: updated });
-
-        return { ok: true, review: updated };
-      },
-    );
-
-    // -------------------------------------------------------------------------
-    // Data: review_status (for UI)
-    // -------------------------------------------------------------------------
-    ctx.data.register(
-      "review_status",
-      async (query: { issueId?: string }): Promise<ReviewStatusData> => {
-        if (!query.issueId) return { review: null };
-        const review = await getReview(ctx, query.issueId);
-        return { review };
-      },
-    );
-
-    // -------------------------------------------------------------------------
-    // Data: review_history (for UI)
-    // -------------------------------------------------------------------------
-    ctx.data.register(
-      "review_history",
-      async (query: { issueId?: string }): Promise<ReviewHistoryData> => {
-        if (!query.issueId) return { actions: [] };
-        const review = await getReview(ctx, query.issueId);
-        return { actions: review?.actionLog ?? [] };
-      },
-    );
-
-    // -------------------------------------------------------------------------
-    // Event: agent.run.finished — auto-evaluate on agent run completion
-    // -------------------------------------------------------------------------
-    ctx.events.on(
-      "agent.run.finished" as const,
-      async (rawEvent: PluginEvent) => {
-        const event = rawEvent as AgentRunFinishedEvent;
-        const runId = (rawEvent as unknown as { payload?: { runId?: string } }).payload?.runId
-          ?? (rawEvent as unknown as { runId?: string }).runId;
-        const companyId = rawEvent.companyId ?? "";
-        ctx.logger.info("agent.run.finished event", { runId, companyId });
-
-        if (!runId || !companyId) {
-          ctx.logger.warn("agent.run.finished: missing runId or companyId, skipping");
-          return;
-        }
-
-        // Look up the issue by executionRunId or checkoutRunId
-        let issueId: string | undefined;
-        try {
-          const issues = await ctx.issues.list({ companyId, limit: 50 });
-          const matched = issues.find(
-            (issue) =>
-              issue.executionRunId === runId || issue.checkoutRunId === runId,
-          );
-          issueId = matched?.id;
-        } catch (err) {
-          ctx.logger.warn("agent.run.finished: failed to list issues", { error: String(err) });
-        }
-
-        if (!issueId) {
-          ctx.logger.info("agent.run.finished: no issue found for this runId, skipping auto-gate");
-          return;
-        }
-
-        const cfg = await getConfig(ctx);
-
-        // Only auto-process if no review exists yet
-        const existing = await getReview(ctx, issueId);
-        if (existing) {
-          ctx.logger.info("agent.run.finished: review already exists for issue", { issueId });
-          return;
-        }
-
-        // Run quality evaluation with placeholder/zero scores since
-        // this is an auto-trigger without agent-provided self-assessment
-        const evaluation = evaluateDeliverable({
-          qualityScore: undefined,
-          blockApproval: false,
-          config: cfg,
-        });
-
-        const review = buildNewReview({
+      if (!review) {
+        review = buildNewReview({
           issueId,
           companyId,
-          summary: `Agent run ${runId} completed — auto-evaluated (no deliverable summary provided)`,
+          summary,
           qualityScore: evaluation.overallScore,
-          blockApproval: false,
-          reviewerName: "System",
+          blockApproval: blockApproval ?? false,
+          reviewerName: "Agent",
           qualityChecks: evaluation.checks,
           evaluationSummary: evaluation.summary,
         });
-
-        // If blockThresholdBreached, mark as pending_review with blocked flag
-        if (evaluation.blockThresholdBreached) {
-          review.actionLog[review.actionLog.length - 1] = {
-            ...review.actionLog[review.actionLog.length - 1],
-            action: `auto-blocked — score ${evaluation.overallScore} below block threshold (${cfg.blockThreshold})`,
-            auto: true,
-          };
-        }
-
-        await putReview(ctx, review);
-
-        // Post a comment on the issue
-        if (companyId) {
-          try {
-            await ctx.issues.createComment(issueId, buildSubmitComment({
-              qualityScore: evaluation.overallScore,
-              evaluationSummary: evaluation.summary,
-              blockApproval: false,
-              qualityChecks: evaluation.checks,
-            }), companyId);
-          } catch (err) {
-            ctx.logger.warn("agent.run.finished: failed to post comment", { error: String(err) });
-          }
-        }
-
-        // Set appropriate issue status
-        if (companyId) {
-          try {
-            const targetStatus = getTargetIssueStatus({
-              status: review.status,
-              blockThresholdBreached: evaluation.blockThresholdBreached,
-              autoRejected: evaluation.autoRejected,
-            });
-            await ctx.issues.update(issueId, { status: targetStatus as "done" | "blocked" | "backlog" | "todo" | "in_progress" | "in_review" | "cancelled" }, companyId);
-          } catch (err) {
-            ctx.logger.warn("agent.run.finished: failed to update issue status", { error: String(err) });
-          }
-        }
-
-        // Emit stream event for real-time UI refresh
-        ctx.streams.emit("review_updated", { issueId: review.issueId, review });
-
-        ctx.logger.info("agent.run.finished: auto-gate complete", {
-          issueId,
-          score: evaluation.overallScore,
-          passed: evaluation.passed,
-          blockThresholdBreached: evaluation.blockThresholdBreached,
+      } else {
+        review = updateReviewStatus(review, review.status, {
+          action: `auto-evaluated after agent.run.finished (resumed)`,
+          reviewer: "agent",
+          reviewerName: "System",
+          comment: evaluation.summary,
+          qualityScore: evaluation.overallScore,
+          auto: true,
         });
-      },
-    );
+      }
 
-    // -------------------------------------------------------------------------
-    // Event: issue.created
-    // -------------------------------------------------------------------------
-    ctx.events.on(
-      "issue.created",
-      async (event: PluginEvent<unknown>) => {
-        const issueId = (event.payload as IssuePayload | undefined)?.issue?.id;
-        if (!issueId) return;
-        ctx.logger.info("issue.created event", { issueId });
+      await putReview(ctx, review);
 
-        const existing = await getReview(ctx, issueId);
-        if (!existing) {
-          const review = buildNewReview({
+      const targetStatus = mapTargetStatus(evaluation.category);
+
+      try {
+        if (targetStatus) {
+          await ctx.issues.update(
             issueId,
-            companyId: event.companyId ?? "",
-            summary: `Issue created: ${(event.payload as unknown as IssuePayload)?.issue?.title ?? ""}`,
-            reviewerName: "System",
-          });
-          await putReview(ctx, review);
+            { status: targetStatus as Issue["status"] },
+            companyId,
+          );
         }
-      },
-    );
+      } catch (err) {
+        ctx.logger.warn("agent.run.finished: failed to update issue status", { error: String(err) });
+      }
 
-    // -------------------------------------------------------------------------
-    // Event: issue.updated
-    // -------------------------------------------------------------------------
-    ctx.events.on(
-      "issue.updated",
-      async (event: PluginEvent<unknown>) => {
-        const issueId = (event.payload as IssuePayload | undefined)?.issue?.id;
-        if (!issueId) return;
-        ctx.logger.info("issue.updated event", { issueId });
-
-        const review = await getReview(ctx, issueId);
-        if (review && review.status === "pending_review") {
-          const updated = updateReviewStatus(review, review.status, {
-            action: "issue updated — review in progress",
-            reviewer: "agent",
-            reviewerName: "System",
-          });
-          await putReview(ctx, updated);
-        }
-      },
-    );
-
-    // -------------------------------------------------------------------------
-    // Event: issue.comment_created
-    // -------------------------------------------------------------------------
-    ctx.events.on(
-      "issue.comment.created" as PluginEventType,
-      async (event: PluginEvent<unknown>) => {
-        const payload = event.payload as CommentPayload | undefined;
-        const issueId = payload?.issue?.id;
-        const commentBody = payload?.comment?.body;
-        if (!issueId || !commentBody) return;
-        ctx.logger.info("issue.comment.created event", {
+      try {
+        await ctx.issues.createComment(
           issueId,
-          commentLength: commentBody.length,
-        });
+          buildSubmitComment({
+            qualityScore: evaluation.overallScore,
+            evaluationSummary: evaluation.summary,
+            blockApproval: blockApproval ?? false,
+            qualityChecks: evaluation.checks,
+          }),
+          companyId,
+        );
+      } catch (err) {
+        ctx.logger.warn("agent.run.finished: failed to post comment", { error: String(err) });
+      }
 
-        const review = await getReview(ctx, issueId);
-        if (review) {
-          const authorName = payload?.comment?.authorUserId ?? payload?.comment?.authorAgentId ?? "User";
-          const updated = updateReviewStatus(review, review.status, {
-            action: "comment added",
-            reviewer: "user",
-            reviewerName: String(authorName),
-            comment: commentBody.slice(0, 500),
-          });
-          await putReview(ctx, updated);
-          ctx.streams.emit("review_updated", {
-            issueId: updated.issueId,
-            review: updated,
-          });
-        }
-      },
-    );
+      try {
+        await ctx.activity.log({
+          companyId,
+          message: `Quality gate auto-evaluated after run ${runId} (agent ${agentId})`,
+          entityType: "issue",
+          entityId: issueId,
+        });
+      } catch {
+        // activity not available
+      }
+
+      try {
+        await ctx.metrics.write("quality_gate.reviews.auto_evaluated", 1, { companyId });
+      } catch {
+        // metrics not available
+      }
+
+      ctx.streams.emit("quality_gate.review_updated", { review });
+
+      ctx.logger.info("agent.run.finished: auto-gate complete", {
+        issueId,
+        runId,
+        score: evaluation.overallScore,
+        category: evaluation.category,
+        status: review.status,
+      });
+    });
+
+    /**
+     * issue.created — observe new issues being created.
+     */
+    ctx.events.on("issue.created", async (event: PluginEvent) => {
+      const payload = event.payload as unknown as IssueCreatedEvent;
+      const issue = payload.issue;
+      ctx.logger.info("issue.created observed", {
+        issueId: issue.id,
+        status: issue.status,
+        companyId: event.companyId,
+      });
+    });
+
+    /**
+     * issue.updated — log status changes for audit trail.
+     * Review state is updated reactively via quality_gate.submit / approve / reject.
+     */
+    ctx.events.on("issue.updated", async (event: PluginEvent) => {
+      const payload = event.payload as unknown as IssueUpdatedEvent;
+      const { issue } = payload;
+      ctx.logger.info("issue.updated observed", {
+        issueId: issue.id,
+        status: issue.status,
+        previousStatus: payload.previousStatus,
+        companyId: event.companyId,
+      });
+    });
+
+    ctx.logger.info(`${PLUGIN_ID} setup complete`);
+  },
+
+  async onHealth() {
+    return { status: "ok", version: PLUGIN_VERSION };
   },
 });
 
 export default plugin;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-runWorker(plugin, (import.meta as unknown as { url: string }).url);
+runWorker(plugin, import.meta.url);

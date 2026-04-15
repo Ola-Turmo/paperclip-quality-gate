@@ -1,120 +1,99 @@
-// =============================================================================
-// Quality Gate — Shared Types
-// =============================================================================
+import type { Issue, IssueComment } from "@paperclipai/shared";
 
-export type ReviewStatus = "pending_review" | "approved" | "rejected";
-export type ReviewerType = "agent" | "user";
+// ── Config ──────────────────────────────────────────────────────────────────
 
-/** A single entry in the review action log. */
-export interface ReviewActionLog {
-  timestamp: string;
+export interface QualityGateSettings {
+  minQualityScore: number;
+  blockThreshold: number;
+  autoRejectBelow: number;
+}
+
+// ── Evaluation ──────────────────────────────────────────────────────────────
+
+export type QualityCategory =
+  | "none"
+  | "passed"
+  | "needs_human_review"
+  | "blocked"
+  | "auto_rejected"
+  | "pending_review"
+  | "rejected";
+
+export interface QualityCheck {
+  id: string;
+  name: string;
+  passed: boolean;
+  score: number;
+  details?: string;
+}
+
+export interface QualityEvaluation {
+  overallScore: number;
+  category: QualityCategory;
+  checks: QualityCheck[];
+  summary: string;
+  autoRejected: boolean;
+  blockThresholdBreached: boolean;
+  passed: boolean;
+}
+
+// ── Review ──────────────────────────────────────────────────────────────────
+
+export type ReviewStatus =
+  | "pending_review"
+  | "needs_human_review"
+  | "auto_rejected"
+  | "approved"
+  | "rejected";
+
+export interface ReviewAction {
   action: string;
-  reviewer: ReviewerType;
+  reviewer: "user" | "agent" | "system";
   reviewerName: string;
   comment?: string;
   qualityScore?: number;
-  auto?: boolean; // true if this was an automated action
+  auto?: boolean;
+  createdAt: string;
 }
 
-/** The complete review record for one issue's deliverable. */
 export interface DeliverableReview {
+  id: string;
   issueId: string;
   companyId: string;
   status: ReviewStatus;
-  deliverableSummary?: string;
-  qualityScore?: number;
+  qualityScore: number;
   blockApproval: boolean;
-  /** Whether this review was auto-rejected (score < autoRejectBelow). */
-  autoRejected?: boolean;
-  /** Structured quality check results */
-  qualityChecks?: QualityCheck[];
-  /** Human-readable evaluation summary */
-  evaluationSummary?: string;
-  actionLog: ReviewActionLog[];
-  submittedAt: string;
+  category: QualityCategory;
+  checks: QualityCheck[];
+  evaluationSummary: string;
+  submitterName: string;
+  history: ReviewAction[];
+  createdAt: string;
   updatedAt: string;
 }
 
-/** Result of a single quality check category. */
-export interface QualityCheck {
-  category: QualityCheckCategory;
-  passed: boolean;
-  score: number; // 0–10
-  message?: string;
-}
+// ── Action params ───────────────────────────────────────────────────────────
 
-export type QualityCheckCategory =
-  | "completeness"
-  | "clarity"
-  | "correctness"
-  | "test_coverage"
-  | "documentation";
-
-/** Overall quality evaluation result. */
-export interface QualityEvaluation {
-  overallScore: number; // 0–10 weighted average
-  passed: boolean;
-  /** Score < autoRejectBelow — agent can retry without human review */
-  autoRejected: boolean;
-  /** Score between blockThreshold and autoRejectBelow — needs human review, issue → blocked */
-  blockThresholdBreached: boolean;
-  checks: QualityCheck[];
-  blockers: string[]; // human-readable blocking issues
-  summary: string;
-}
-
-/** Tool input shape for the `quality_gate_review` agent tool. */
-export interface QualityGateReviewInput {
-  issue_id: string;
-  deliverable_summary?: string;
-  quality_score?: number;
-  block_approval?: boolean;
-  /** Detailed self-assessment per category (optional, enables richer evaluation) */
-  self_assessment?: {
-    completeness?: number;
-    clarity?: number;
-    correctness?: number;
-    test_coverage?: number;
-    documentation?: number;
-  };
-}
-
-/** Tool output shape returned by the `quality_gate_review` handler. */
-export interface QualityGateReviewOutput {
-  success: boolean;
-  review: DeliverableReview;
-  evaluation: QualityEvaluation;
-  message: string;
-}
-
-/** Plugin instance configuration — matches instanceConfigSchema in manifest. */
-export interface QualityGateConfig {
-  minQualityScore: number; // default 7
-  blockThreshold: number;   // default 5
-  autoRejectBelow: number;  // default 3
-}
-
-/** Action params — submit for review (user-initiated). */
 export interface SubmitForReviewParams {
   issue_id: string;
   summary?: string;
   quality_score?: number;
   block_approval?: boolean;
+  comment?: string;
 }
 
-/** Action params — approve deliverable. */
 export interface ApproveParams {
   issue_id: string;
   comment?: string;
 }
 
-/** Action params — reject deliverable. */
 export interface RejectParams {
   issue_id: string;
   comment: string;
 }
 
-/** Standard action result with optional message for idempotent no-ops. */
+// ── Standard result ─────────────────────────────────────────────────────────
+
 export interface ActionResult<T = unknown> {
   ok: boolean;
   review?: T;
@@ -122,63 +101,53 @@ export interface ActionResult<T = unknown> {
   error?: string;
 }
 
-/** UI data shape for `review_status`. */
-export interface ReviewStatusData {
-  review: DeliverableReview | null;
-}
+// ── Event payloads ──────────────────────────────────────────────────────────
 
-/** UI data shape for `review_history`. */
-export interface ReviewHistoryData {
-  actions: ReviewActionLog[];
-}
-
-/** Event type for the review_updated stream channel. */
-export interface ReviewUpdatedEvent {
-  issueId: string;
-  review: DeliverableReview;
-}
-
-/** Issue status values available in Paperclip UOS. */
-export type IssueStatus =
-  | "backlog"
-  | "todo"
-  | "in_progress"
-  | "in_review"
-  | "done"
-  | "blocked"
-  | "cancelled";
-
-/**
- * Typed event payload wrappers used internally.
- * These match what Paperclip emits on the event bus.
- */
 export interface IssueCreatedEvent {
-  payload: { issue?: { id?: string; title?: string } };
-  companyId?: string;
+  issue: { id: string; title?: string; status?: string; assigneeId?: string };
 }
+
 export interface IssueUpdatedEvent {
-  payload: { issue?: { id?: string; title?: string } };
-  companyId?: string;
+  issue: { id: string; title?: string; status?: string; assigneeId?: string };
+  previousStatus?: string;
 }
+
 export interface CommentCreatedEvent {
-  payload: {
-    issue?: { id?: string };
-    comment?: {
-      id?: string;
-      body?: string;
-      authorUserId?: string | null;
-      authorAgentId?: string | null;
-    };
-  };
-  companyId?: string;
+  comment: { id: string; body?: string; authorId?: string };
+  issueId: string;
 }
 
-// ---------------------------------------------------------------------------
-// Default config (shared between manifest and helpers)
-// ---------------------------------------------------------------------------
+export interface AgentRunFinishedEvent {
+  agentId: string;
+  status: "completed" | "failed" | "cancelled";
+  summary?: string;
+  qualityScore?: number;
+  blockApproval?: boolean;
+}
 
-export const DEFAULT_CONFIG: QualityGateConfig = {
-  minQualityScore: 7,
-  blockThreshold: 5,
-  autoRejectBelow: 3,
-};
+// ── UI data shapes ──────────────────────────────────────────────────────────
+
+export interface ReviewStatusData {
+  review: DeliverableReview;
+  issue?: { id: string; title?: string; status?: string };
+}
+
+export interface ReviewsListData {
+  reviews: ReviewStatusData[];
+  total: number;
+}
+
+// ── Agent tools ─────────────────────────────────────────────────────────────
+
+export interface QualityGateReviewInput {
+  issue_id: string;
+  include_checks?: boolean;
+}
+
+export interface SubmitForReviewInput {
+  issue_id: string;
+  summary?: string;
+  quality_score?: number;
+  block_approval?: boolean;
+  comment?: string;
+}

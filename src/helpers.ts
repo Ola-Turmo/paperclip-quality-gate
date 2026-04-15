@@ -1,341 +1,288 @@
-// =============================================================================
-// Quality Gate — Helpers
-// =============================================================================
-
-import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type {
   DeliverableReview,
+  QualityCategory,
   QualityCheck,
-  QualityCheckCategory,
   QualityEvaluation,
-  QualityGateConfig,
-  QualityGateReviewInput,
-  ReviewActionLog,
+  QualityGateSettings,
+  ReviewAction,
   ReviewStatus,
 } from "./types.js";
+import { DEFAULT_CONFIG } from "./manifest.js";
 
-import { DEFAULT_CONFIG } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// State key constants
-// ---------------------------------------------------------------------------
+// ── Constants ────────────────────────────────────────────────────────────────
 
 export const STATE_KEYS = {
-  REVIEWS: "reviews",
-  CONFIG: "config",
+  REVIEWS: "reviews",          // per-issue: DeliverableReview
+  REVIEW_IDS: "review_ids",    // per-company: string[]
 } as const;
 
-// ---------------------------------------------------------------------------
-// Config helpers
-// ---------------------------------------------------------------------------
+// ── Deterministic hash (djb2) ───────────────────────────────────────────────
 
-export async function getConfig(
-  ctx: PluginContext,
-): Promise<QualityGateConfig> {
-  const state = await ctx.state.get({
-    scopeKind: "instance",
-    stateKey: STATE_KEYS.CONFIG,
+function djb2(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  }
+  return Math.abs(hash);
+}
+
+// ── Quality evaluation ──────────────────────────────────────────────────────
+
+export function evaluateQuality(
+  score: number | undefined,
+  blockApproval: boolean,
+  config: QualityGateSettings,
+): QualityEvaluation {
+  const base = score ?? 0;
+
+  let category: QualityCategory;
+  let autoRejected = false;
+  let blockThresholdBreached = false;
+  let passed = false;
+
+  if (score === undefined || score === null) {
+    category = "none";
+  } else if (score < config.autoRejectBelow) {
+    category = "auto_rejected";
+    autoRejected = true;
+  } else if (blockApproval || score <= config.blockThreshold) {
+    category = "needs_human_review";
+    blockThresholdBreached = true;
+  } else if (score >= config.minQualityScore) {
+    category = "passed";
+    passed = true;
+  } else {
+    category = "needs_human_review";
+    blockThresholdBreached = true;
+  }
+
+  // Deterministic ±1 variance per category/score to provide varied check results
+  const variant = (djb2(category + String(score)) % 3) - 1; // -1, 0, or +1
+  const overallScore = Math.max(0, Math.min(10, base + variant));
+
+  // Build per-category check breakdown
+  const checks: QualityCheck[] = buildChecks(overallScore, category, score, blockApproval ?? false);
+
+  const summary = buildSummary(overallScore, category, autoRejected, blockThresholdBreached, passed, score);
+
+  return { overallScore, category, checks, summary, autoRejected, blockThresholdBreached, passed } as QualityEvaluation;
+}
+
+function buildChecks(
+  overallScore: number,
+  category: QualityCategory,
+  rawScore: number | undefined,
+  blockApproval: boolean,
+): QualityCheck[] {
+  const now = new Date().toISOString();
+  const checks: QualityCheck[] = [];
+
+  // Score check
+  checks.push({
+    id: "score_threshold",
+    name: "Quality Score Threshold",
+    passed: category !== "none" && category !== "auto_rejected",
+    score: overallScore,
+    details: rawScore !== undefined
+      ? `Score ${rawScore} ${rawScore >= 7 ? "meets" : "below"} minimum threshold`
+      : "No score provided",
   });
-  return (state as QualityGateConfig) ?? DEFAULT_CONFIG;
-}
 
-// ---------------------------------------------------------------------------
-// State persistence helpers
-// ---------------------------------------------------------------------------
-
-type ReviewsMap = Record<string, DeliverableReview>;
-
-export async function getReviewsMap(
-  ctx: PluginContext,
-): Promise<ReviewsMap> {
-  const state = await ctx.state.get({
-    scopeKind: "instance",
-    stateKey: STATE_KEYS.REVIEWS,
+  // Blocker check
+  checks.push({
+    id: "no_blockers",
+    name: "No Blocker Flags",
+    passed: category !== "blocked" && category !== "needs_human_review",
+    score: blockApproval ? 0 : overallScore,
+    details: blockApproval
+      ? "Block approval flag set — requires human review"
+      : "No blocking issues detected",
   });
-  return (state as ReviewsMap) ?? {};
-}
 
-export async function putReviewsMap(
-  ctx: PluginContext,
-  reviews: ReviewsMap,
-): Promise<void> {
-  await ctx.state.set(
-    { scopeKind: "instance", stateKey: STATE_KEYS.REVIEWS },
-    reviews,
-  );
-}
-
-export async function getReview(
-  ctx: PluginContext,
-  issueId: string,
-): Promise<DeliverableReview | null> {
-  const review = await ctx.state.get({
-    scopeKind: "issue",
-    scopeId: issueId,
-    stateKey: STATE_KEYS.REVIEWS,
+  // Auto-reject check
+  checks.push({
+    id: "auto_reject",
+    name: "Auto-Reject Check",
+    passed: category !== "auto_rejected",
+    score: overallScore,
+    details: category === "auto_rejected"
+      ? `Score below auto-reject threshold (${rawScore} < threshold)`
+      : "Above auto-reject threshold",
   });
-  return (review as DeliverableReview | null) ?? null;
+
+  return checks;
 }
 
-export async function putReview(
-  ctx: PluginContext,
-  review: DeliverableReview,
-): Promise<void> {
-  // Store each review under its own per-issue state key — fully atomic,
-  // no read-modify-write races across concurrent reviews on different issues.
-  await ctx.state.set(
-    { scopeKind: "issue", scopeId: review.issueId, stateKey: STATE_KEYS.REVIEWS },
-    review,
-  );
+function buildSummary(
+  overallScore: number,
+  category: QualityCategory,
+  autoRejected: boolean,
+  blockThresholdBreached: boolean,
+  passed: boolean,
+  rawScore: number | undefined,
+): string {
+  if (category === "none") {
+    return "No quality score provided — deliverable requires human review.";
+  }
+  if (autoRejected) {
+    return `Quality score ${rawScore} is below the auto-reject threshold. ` +
+           "Work has been automatically rejected — please address quality concerns and resubmit.";
+  }
+  if (blockThresholdBreached) {
+    return `Quality score ${rawScore} is within the review range. ` +
+           "A reviewer must approve before this deliverable can be marked complete.";
+  }
+  if (passed) {
+    return `Quality score ${overallScore} meets the minimum threshold. ` +
+           "Deliverable is ready for human final review and approval.";
+  }
+  return `Quality score ${overallScore} requires review before approval.`;
 }
 
-// ---------------------------------------------------------------------------
-// Review factory helpers
-// ---------------------------------------------------------------------------
+// ── Review helpers ──────────────────────────────────────────────────────────
 
-export function buildNewReview(params: {
+export function buildNewReview(fields: {
   issueId: string;
   companyId: string;
   summary?: string;
   qualityScore?: number;
   blockApproval?: boolean;
-  reviewerName?: string;
+  reviewerName: string;
   qualityChecks?: QualityCheck[];
   evaluationSummary?: string;
 }): DeliverableReview {
   const now = new Date().toISOString();
-  const action: ReviewActionLog = {
-    timestamp: now,
-    action: "submitted for review",
-    reviewer: "agent",
-    reviewerName: params.reviewerName ?? "Agent",
-    comment: params.summary,
-    qualityScore: params.qualityScore,
-    auto: false,
-  };
+  const category = evaluateQuality(
+    fields.qualityScore,
+    fields.blockApproval ?? false,
+    DEFAULT_CONFIG,
+  ).category;
+
   return {
-    issueId: params.issueId,
-    companyId: params.companyId,
+    id: `review_${fields.issueId}_${Date.now()}`,
+    issueId: fields.issueId,
+    companyId: fields.companyId,
     status: "pending_review",
-    deliverableSummary: params.summary,
-    qualityScore: params.qualityScore,
-    blockApproval: params.blockApproval ?? false,
-    qualityChecks: params.qualityChecks,
-    evaluationSummary: params.evaluationSummary,
-    actionLog: [action],
-    submittedAt: now,
+    qualityScore: fields.qualityScore ?? 0,
+    blockApproval: fields.blockApproval ?? false,
+    category,
+    checks: fields.qualityChecks ?? [],
+    evaluationSummary: fields.evaluationSummary ?? "",
+    submitterName: fields.reviewerName,
+    history: [
+      {
+        action: "submitted",
+        reviewer: "user",
+        reviewerName: fields.reviewerName,
+        comment: fields.summary,
+        qualityScore: fields.qualityScore,
+        createdAt: now,
+      },
+    ],
+    createdAt: now,
     updatedAt: now,
   };
 }
 
 export function updateReviewStatus(
   review: DeliverableReview,
-  newStatus: ReviewStatus,
-  action: Omit<ReviewActionLog, "timestamp">,
+  status: ReviewStatus,
+  action: Omit<ReviewAction, "createdAt">,
 ): DeliverableReview {
   const now = new Date().toISOString();
   return {
     ...review,
-    status: newStatus,
-    actionLog: [...review.actionLog, { ...action, timestamp: now }],
+    status,
     updatedAt: now,
+    history: [
+      ...review.history,
+      { ...action, createdAt: now },
+    ],
   };
 }
 
-// ---------------------------------------------------------------------------
-// Quality evaluation
-// ---------------------------------------------------------------------------
+// ── Comment builders ────────────────────────────────────────────────────────
 
-const CATEGORY_WEIGHTS: Record<QualityCheckCategory, number> = {
-  completeness: 0.30,
-  correctness: 0.30,
-  clarity: 0.20,
-  test_coverage: 0.10,
-  documentation: 0.10,
-};
-
-function evaluateCategory(
-  category: QualityCheckCategory,
-  score: number,
-  hasBlocker: boolean,
-): QualityCheck {
-  const passed = score >= 6 && !hasBlocker;
-  return {
-    category,
-    passed,
-    score,
-    message: getCategoryMessage(category, score, hasBlocker),
-  };
-}
-
-function getCategoryMessage(
-  category: QualityCheckCategory,
-  score: number,
-  hasBlocker: boolean,
-): string {
-  if (hasBlocker) return "⚠️ Blocker flagged — requires human review before approval.";
-  switch (category) {
-    case "completeness":
-      return score >= 8
-        ? "✅ All required components present"
-        : score >= 6
-        ? "⚠️ Minor gaps in scope"
-        : "❌ Significant scope gaps or missing parts";
-    case "correctness":
-      return score >= 8
-        ? "✅ No logical errors detected"
-        : score >= 6
-        ? "⚠️ Minor correctness concerns"
-        : "❌ Logical errors or bugs likely present";
-    case "clarity":
-      return score >= 8
-        ? "✅ Clear and well-documented"
-        : score >= 6
-        ? "⚠️ Some sections unclear"
-        : "❌ Poorly documented or confusing";
-    case "test_coverage":
-      return score >= 8
-        ? "✅ Good test coverage"
-        : score >= 5
-        ? "⚠️ Limited test coverage"
-        : "❌ Missing or inadequate tests";
-    case "documentation":
-      return score >= 8
-        ? "✅ Well-documented"
-        : score >= 5
-        ? "⚠️ Documentation could be improved"
-        : "❌ Documentation missing";
-    default:
-      return "";
+export function buildSubmitComment(p: {
+  qualityScore: number;
+  evaluationSummary: string;
+  blockApproval?: boolean;
+  qualityChecks: QualityCheck[];
+}): string {
+  const lines = [
+    "## Quality Gate — Deliverable Submitted",
+    "",
+    `**Score:** ${p.qualityScore}/10`,
+    `**Status:** Awaiting review`,
+    "",
+    p.evaluationSummary,
+    "",
+  ];
+  if (p.blockApproval) {
+    lines.push("⚠️ Block approval flag was set — manual review required.");
   }
+  return lines.join("\n");
 }
 
-function computeWeightedScore(checks: QualityCheck[]): number {
-  let total = 0;
-  let weightSum = 0;
-  for (const check of checks) {
-    const weight = CATEGORY_WEIGHTS[check.category] ?? 0.1;
-    total += check.score * weight;
-    weightSum += weight;
+export function buildApproveComment(comment?: string): string {
+  const lines = [
+    "## ✅ Quality Gate — Approved",
+    "",
+    "This deliverable has been approved by a reviewer.",
+  ];
+  if (comment) {
+    lines.push("", `> ${comment}`);
   }
-  return weightSum > 0 ? Math.round((total / weightSum) * 10) / 10 : 0;
+  lines.push("", "_Quality gate passed._");
+  return lines.join("\n");
 }
+
+export function buildRejectComment(comment: string): string {
+  const lines = [
+    "## ❌ Quality Gate — Rejected",
+    "",
+    "This deliverable has been rejected and returned to the agent.",
+    "",
+    `> ${comment}`,
+    "",
+    "_Please address the feedback and resubmit for review._",
+  ];
+  return lines.join("\n");
+}
+
+export function buildAutoRejectComment(score: number, autoRejectBelow: number): string {
+  return [
+    "## ⚠️ Quality Gate — Auto-Rejected",
+    "",
+    `Score ${score} is below the auto-reject threshold of ${autoRejectBelow}.`,
+    "",
+    "This deliverable has been automatically rejected. Please improve quality and resubmit.",
+    "",
+    "_No human review was performed._",
+  ].join("\n");
+}
+
+// ── Status mapping ─────────────────────────────────────────────────────────
 
 /**
- * Sophisticated multi-category quality evaluation.
- * Accepts explicit self-assessment scores OR derives them from the single quality_score.
+ * Maps quality evaluation category → Paperclip issue status.
+ * Returns null when no status change should be made.
  */
-export function evaluateDeliverable(params: {
-  qualityScore?: number;
-  blockApproval?: boolean;
-  selfAssessment?: QualityGateReviewInput["self_assessment"];
-  config?: QualityGateConfig;
-}): QualityEvaluation {
-  const cfg = params.config ?? DEFAULT_CONFIG;
-  const blockers: string[] = [];
-  const checks: QualityCheck[] = [];
-
-  // Agent-flagged blocker always requires human review
-  if (params.blockApproval) {
-    blockers.push(
-      "Agent flagged a known limitation with block_approval=true — human review required.",
-    );
+export function mapTargetStatus(
+  category: QualityCategory,
+): string | null {
+  switch (category) {
+    case "passed":
+    case "needs_human_review":
+    case "pending_review":
+      return "in_review";
+    case "auto_rejected":
+      return "in_progress";
+    case "rejected":
+      return "in_progress";
+    case "blocked":
+      return "blocked";
+    default:
+      return null;
   }
-
-  // Build per-category checks
-  if (params.selfAssessment) {
-    const sa = params.selfAssessment;
-    for (const [cat, score] of Object.entries(sa) as [
-      QualityCheckCategory,
-      number,
-    ][]) {
-      if (score === undefined) continue;
-      checks.push(
-        evaluateCategory(
-          cat,
-          Math.max(0, Math.min(10, score)),
-          params.blockApproval ?? false,
-        ),
-      );
-    }
-  } else {
-    // Fall back to single score: derive per-category scores from base score.
-    // Use a deterministic mapping so the same qualityScore always produces the
-    // same category breakdown (no Math.random — reproducibility matters).
-    const base = params.qualityScore ?? 5;
-    const categories: QualityCheckCategory[] = [
-      "completeness",
-      "correctness",
-      "clarity",
-      "test_coverage",
-      "documentation",
-    ];
-    // Deterministic per-category offset derived from category name hash.
-    // Gives stable ±1 variance without Math.random.
-    for (const cat of categories) {
-      let hash = 5381;
-      for (let i = 0; i < cat.length; i++) hash = ((hash << 5) + hash) + cat.charCodeAt(i);
-      hash = ((hash << 5) + hash) + base;
-      const variant = Math.abs(hash) % 3;
-      const variance = variant - 1; // -1, 0, or +1
-      const score = Math.max(0, Math.min(10, base + variance));
-      checks.push(
-        evaluateCategory(cat, score, params.blockApproval ?? false),
-      );
-    }
-  }
-
-  const overallScore = computeWeightedScore(checks);
-  const failedChecks = checks.filter((c) => !c.passed);
-
-  // Auto-reject very low scores — agent can fix and retry without human review
-  const autoRejected = overallScore < cfg.autoRejectBelow;
-
-  // Block threshold breach — score between autoRejectBelow and blockThreshold
-  // needs human review (blocked status). Scores < autoRejectBelow are auto-rejected.
-  const blockThresholdBreached =
-    !autoRejected && overallScore < cfg.blockThreshold;
-
-  // Determine pass/fail
-  const hasBlockers = blockers.length > 0;
-  const anyFailedChecks = failedChecks.length > 0;
-  const passed =
-    !autoRejected &&
-    overallScore >= cfg.minQualityScore &&
-    !hasBlockers &&
-    !anyFailedChecks;
-
-  if (autoRejected) {
-    blockers.push(
-      `Score ${overallScore} is below auto-reject threshold (${cfg.autoRejectBelow}) — automatically rejected. Agent should fix and resubmit.`,
-    );
-  } else if (blockThresholdBreached) {
-    blockers.push(
-      `Score ${overallScore} below block threshold (${cfg.blockThreshold}) — human review required.`,
-    );
-  } else if (overallScore < cfg.minQualityScore) {
-    blockers.push(
-      `Score ${overallScore} below minimum threshold (${cfg.minQualityScore}).`,
-    );
-  }
-
-  const summary = passed
-    ? `✅ Quality gate passed (score: ${overallScore}/10).`
-    : autoRejected
-    ? `❌ Auto-rejected (score: ${overallScore}/10 below ${cfg.autoRejectBelow}). Agent should fix and resubmit.`
-    : blockThresholdBreached
-    ? `🚫 Quality gate blocked (score: ${overallScore}/10 below ${cfg.blockThreshold}) — human review required.`
-    : blockers.length > 0
-    ? `⚠️ Quality gate blocked — ${blockers[0]}`
-    : `⚠️ Quality score ${overallScore}/10 is below minimum (${cfg.minQualityScore}).`;
-
-  return {
-    overallScore,
-    passed,
-    autoRejected,
-    blockThresholdBreached,
-    checks,
-    blockers,
-    summary,
-  };
 }
