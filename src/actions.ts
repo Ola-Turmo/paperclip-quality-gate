@@ -8,6 +8,8 @@ import type {
   ActionResult,
   ApproveParams,
   AssignParams,
+  BulkApproveParams,
+  BulkRejectParams,
   DeliverableReview,
   RejectParams,
   ReviewStatus,
@@ -336,6 +338,91 @@ async function handleAssign(
   return { ok: true, review: updated } as ActionResult<DeliverableReview>;
 }
 
+interface BulkResultItem {
+  issueId: string;
+  ok: boolean;
+  error?: string;
+}
+
+async function processBulk(
+  ctx: PluginContext,
+  issueIds: string[],
+  fn: (ctx: PluginContext, params: Record<string, unknown>) => Promise<ActionResult>,
+): Promise<{ succeeded: string[]; failed: BulkResultItem[] }> {
+  const succeeded: string[] = [];
+  const failed: BulkResultItem[] = [];
+  const CONCURRENCY = 5;
+  for (let i = 0; i < issueIds.length; i += CONCURRENCY) {
+    const batch = issueIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((issueId) =>
+        fn(ctx, { issue_id: issueId }).then((r) => ({ issueId, r }))
+      )
+    );
+    for (const { issueId, r } of results) {
+      if (r.ok) {
+        succeeded.push(issueId);
+      } else {
+        failed.push({ issueId, ok: false, error: r.error ?? "Unknown error" });
+      }
+    }
+  }
+  return { succeeded, failed };
+}
+
+/**
+ * quality_gate.bulk_approve — approve multiple deliverables at once.
+ * Processes up to 5 concurrent approvals.
+ */
+async function handleBulkApprove(
+  ctx: PluginContext,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const p = castParams<BulkApproveParams>(params);
+  if (!p.issue_ids || p.issue_ids.length === 0) {
+    return { ok: false, error: "issue_ids is required and must be non-empty" } as ActionResult;
+  }
+  const { succeeded, failed } = await processBulk(ctx, p.issue_ids, handleApprove);
+  ctx.logger.info("quality_gate.bulk_approve: processed", {
+    total: p.issue_ids.length,
+    succeeded: succeeded.length,
+    failed: failed.length,
+  });
+  return {
+    ok: true,
+    message: `Approved ${succeeded.length}/${p.issue_ids.length}. ${failed.length} failed.`,
+  } as ActionResult;
+}
+
+/**
+ * quality_gate.bulk_reject — reject multiple deliverables at once.
+ * Requires comment. Processes up to 5 concurrent rejections.
+ */
+async function handleBulkReject(
+  ctx: PluginContext,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const p = castParams<BulkRejectParams>(params);
+  if (!p.issue_ids || p.issue_ids.length === 0) {
+    return { ok: false, error: "issue_ids is required and must be non-empty" } as ActionResult;
+  }
+  if (!p.comment) {
+    return { ok: false, error: "comment is required for bulk reject" } as ActionResult;
+  }
+  const { succeeded, failed } = await processBulk(ctx, p.issue_ids, (ctx, params) =>
+    handleReject(ctx, { ...params, comment: p.comment })
+  );
+  ctx.logger.info("quality_gate.bulk_reject: processed", {
+    total: p.issue_ids.length,
+    succeeded: succeeded.length,
+    failed: failed.length,
+  });
+  return {
+    ok: true,
+    message: `Rejected ${succeeded.length}/${p.issue_ids.length}. ${failed.length} failed.`,
+  } as ActionResult;
+}
+
 /**
  * Register all quality_gate actions on the plugin context.
  */
@@ -344,4 +431,6 @@ export function setupActions(ctx: PluginContext): void {
   ctx.actions.register("quality_gate.approve", (params) => handleApprove(ctx, params));
   ctx.actions.register("quality_gate.reject", (params) => handleReject(ctx, params));
   ctx.actions.register("quality_gate.assign", (params) => handleAssign(ctx, params));
+  ctx.actions.register("quality_gate.bulk_approve", (params) => handleBulkApprove(ctx, params));
+  ctx.actions.register("quality_gate.bulk_reject", (params) => handleBulkReject(ctx, params));
 }

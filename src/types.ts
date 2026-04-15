@@ -97,6 +97,16 @@ export interface AssignParams {
   assigned_to: string;
 }
 
+export interface BulkApproveParams {
+  issue_ids: string[];
+  comment?: string;
+}
+
+export interface BulkRejectParams {
+  issue_ids: string[];
+  comment: string;
+}
+
 // ── Standard result ─────────────────────────────────────────────────────────
 
 export interface ActionResult<T = unknown> {
