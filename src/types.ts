@@ -66,6 +66,7 @@ export interface DeliverableReview {
   checks: QualityCheck[];
   evaluationSummary: string;
   submitterName: string;
+  assignedTo?: string;
   history: ReviewAction[];
   createdAt: string;
   updatedAt: string;
@@ -89,6 +90,11 @@ export interface ApproveParams {
 export interface RejectParams {
   issue_id: string;
   comment: string;
+}
+
+export interface AssignParams {
+  issue_id: string;
+  assigned_to: string;
 }
 
 // ── Standard result ─────────────────────────────────────────────────────────

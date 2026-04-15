@@ -7,12 +7,14 @@ import type { Issue } from "@paperclipai/plugin-sdk";
 import type {
   ActionResult,
   ApproveParams,
+  AssignParams,
   DeliverableReview,
   RejectParams,
   ReviewStatus,
   SubmitForReviewParams,
 } from "./types.js";
 import {
+  assignReview,
   buildApproveComment,
   buildRejectComment,
   buildSubmitComment,
@@ -300,10 +302,46 @@ async function handleReject(
 }
 
 /**
+ * quality_gate.assign — reassign a review to a different reviewer.
+ * Idempotent: reassigning to the same person is a no-op.
+ */
+async function handleAssign(
+  ctx: PluginContext,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const p = castParams<AssignParams>(params);
+  const issueId = p.issue_id;
+  if (!issueId) {
+    return { ok: false, error: "issue_id is required" } as ActionResult;
+  }
+  if (!p.assigned_to) {
+    return { ok: false, error: "assigned_to is required" } as ActionResult;
+  }
+
+  const review = await getReview(ctx, issueId);
+  if (!review) {
+    return { ok: false, error: "No review found for this issue" } as ActionResult;
+  }
+
+  if (review.assignedTo === p.assigned_to) {
+    return { ok: true, review, message: "Already assigned to this reviewer" } as ActionResult<DeliverableReview>;
+  }
+
+  const updated = assignReview(review, p.assigned_to, "Reviewer");
+  await putReview(ctx, updated);
+
+  ctx.streams.emit("quality_gate.review_assigned", { review: updated });
+
+  ctx.logger.info("quality_gate.assign: review reassigned", { issueId, assignedTo: p.assigned_to });
+  return { ok: true, review: updated } as ActionResult<DeliverableReview>;
+}
+
+/**
  * Register all quality_gate actions on the plugin context.
  */
 export function setupActions(ctx: PluginContext): void {
   ctx.actions.register("quality_gate.submit", (params) => handleSubmit(ctx, params));
   ctx.actions.register("quality_gate.approve", (params) => handleApprove(ctx, params));
   ctx.actions.register("quality_gate.reject", (params) => handleReject(ctx, params));
+  ctx.actions.register("quality_gate.assign", (params) => handleAssign(ctx, params));
 }

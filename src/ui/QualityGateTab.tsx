@@ -155,12 +155,14 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
   const submitAction = usePluginAction("quality_gate.submit");
   const approveAction = usePluginAction("quality_gate.approve");
   const rejectAction = usePluginAction("quality_gate.reject");
+  const assignAction = usePluginAction("quality_gate.assign");
   const reviewData = usePluginData("quality_gate.review", { issueId }) as unknown as ReviewStatusData | null;
   const config = usePluginData("quality_gate.config") as unknown as ConfigData | null;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [assignInput, setAssignInput] = useState("");
 
   // Refresh when issue changes
   useEffect(() => {
@@ -224,6 +226,27 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
     }
   }, [issueId, rejectAction]);
 
+  const handleAssign = useCallback(async () => {
+    const name = assignInput.trim();
+    if (!name) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await assignAction({ issue_id: issueId, assigned_to: name }) as { ok: boolean; error?: string; message?: string };
+      if (r.ok) {
+        setResult(r.message ?? `Assigned to ${name}.`);
+        setAssignInput("");
+      } else {
+        setError(r.error ?? "Assignment failed.");
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [issueId, assignInput, assignAction]);
+
   const review = reviewData?.review;
   const btnStyle = (bg: string): React.CSSProperties => ({
     flex: 1,
@@ -270,6 +293,11 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
             }}>
               {statusLabel(review.status)}
             </div>
+            {review.assignedTo && (
+              <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>
+                👤 {review.assignedTo}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -344,6 +372,41 @@ export function QualityGateTab({ context }: PluginDetailTabProps) {
               marginBottom: 12, fontSize: 12, color: "#6b7280", fontFamily: "monospace",
             }}>
               Thresholds: min={config.minQualityScore} · block≤{config.blockThreshold} · auto-reject&lt;{config.autoRejectBelow}
+            </div>
+          )}
+
+          {/* Assign reviewer */}
+          {review && review.status !== "approved" && (
+            <div style={{
+              background: "#1f2937", borderRadius: 8, padding: "12px 16px",
+              marginBottom: 12, display: "flex", gap: 8, alignItems: "center",
+            }}>
+              <input
+                type="text"
+                placeholder="Reviewer name…"
+                value={assignInput}
+                onChange={(e) => setAssignInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAssign()}
+                disabled={loading}
+                style={{
+                  flex: 1, padding: "7px 10px", background: "#111827",
+                  color: "#f3f4f6", border: "1px solid #374151",
+                  borderRadius: 6, fontSize: 13, outline: "none",
+                }}
+              />
+              <button
+                onClick={handleAssign}
+                disabled={loading || !assignInput.trim()}
+                style={{
+                  padding: "7px 14px",
+                  background: loading ? "#374151" : "#7c3aed",
+                  color: "#fff", border: "none", borderRadius: 6,
+                  fontSize: 13, fontWeight: 500, cursor: loading ? "not-allowed" : "pointer",
+                  opacity: !assignInput.trim() ? 0.5 : 1,
+                }}
+              >
+                Assign
+              </button>
             </div>
           )}
 

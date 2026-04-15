@@ -201,6 +201,30 @@ export function updateReviewStatus(
   };
 }
 
+export function assignReview(
+  review: DeliverableReview,
+  assignedTo: string,
+  reviewerName: string,
+): DeliverableReview {
+  const now = new Date().toISOString();
+  const nextHistory = [
+    ...review.history,
+    {
+      action: "assigned",
+      reviewer: "user",
+      reviewerName,
+      comment: `Assigned to ${assignedTo}`,
+      createdAt: now,
+    } as ReviewAction,
+  ].slice(-MAX_HISTORY_ENTRIES);
+  return {
+    ...review,
+    assignedTo,
+    updatedAt: now,
+    history: nextHistory,
+  };
+}
+
 // ── Comment builders ────────────────────────────────────────────────────────
 
 export function buildSubmitComment(p: {
