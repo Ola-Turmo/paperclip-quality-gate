@@ -47,10 +47,15 @@ export function evaluateQuality(
 
   if (score === undefined || score === null) {
     category = "none";
+  } else if (blockApproval) {
+    // blockApproval takes explicit precedence — force human review regardless of score.
+    // This overrides autoRejectBelow so that flagged deliverables always get human eyes.
+    category = "needs_human_review";
+    blockThresholdBreached = true;
   } else if (score < config.autoRejectBelow) {
     category = "auto_rejected";
     autoRejected = true;
-  } else if (blockApproval || score <= config.blockThreshold) {
+  } else if (score <= config.blockThreshold) {
     category = "needs_human_review";
     blockThresholdBreached = true;
   } else if (score >= config.minQualityScore) {
