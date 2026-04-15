@@ -53,6 +53,7 @@ function categoryBadge(category: string): React.ReactNode {
     needs_human_review:  "#f59e0b",
     blocked:             "#ef4444",
     auto_rejected:       "#dc2626",
+    rejected:            "#ef4444",
     none:                "#6b7280",
   };
   const c = colors[category] ?? "#6b7280";

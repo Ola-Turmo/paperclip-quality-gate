@@ -8,7 +8,8 @@
     "test": "node --test tests/smoke.test.mjs",
     "plugin:typecheck": "tsc --noEmit",
     "plugin:build": "node esbuild.config.mjs",
-    "plugin:dev": "node esbuild.config.mjs --watch"
+    "plugin:dev": "node esbuild.config.mjs --watch",
+    "prepublishOnly": "npm run plugin:build"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -21,7 +22,6 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "esbuild": "^0.24.0",
-    "typescript": "^5.3.0",
-    "vitest": "^3.2.4"
+    "typescript": "^5.3.0"
   }
 }

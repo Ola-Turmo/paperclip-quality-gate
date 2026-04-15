@@ -1,8 +1,9 @@
-import * as React from "react";
+import React from "react";
 import {
   usePluginData,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
+import { DEFAULT_CONFIG } from "../manifest.js";
 
 // =============================================================================
 // Types
@@ -29,13 +30,13 @@ export function QualityGateSettings({
   context,
 }: PluginSettingsPageProps) {
   const { data: config, loading } = usePluginData<QualityGateSettings>(
-    "plugin_config_get",
+    "quality_gate.config",
     {}
   );
 
-  const minScore = config?.minQualityScore ?? 7;
-  const blockThreshold = config?.blockThreshold ?? 5;
-  const autoReject = config?.autoRejectBelow ?? 3;
+  const minScore = config?.minQualityScore ?? DEFAULT_CONFIG.minQualityScore;
+  const blockThreshold = config?.blockThreshold ?? DEFAULT_CONFIG.blockThreshold;
+  const autoReject = config?.autoRejectBelow ?? DEFAULT_CONFIG.autoRejectBelow;
 
   return (
     <div style={{ padding: "24px", maxWidth: "560px", fontFamily: "system-ui, sans-serif" }}>

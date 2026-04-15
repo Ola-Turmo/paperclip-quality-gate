@@ -168,6 +168,12 @@ const manifest: PaperclipPluginManifestV1 = {
         exportName: "QualityGateTab",
         entityTypes: ["issue"],
       },
+      {
+        type: "settingsPage",
+        id: "quality-gate-settings",
+        displayName: "Quality Gate",
+        exportName: "QualityGateSettings",
+      },
     ],
   },
 };
