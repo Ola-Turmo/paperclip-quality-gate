@@ -150,6 +150,7 @@ export function buildNewReview(fields: {
   qualityChecks?: QualityCheck[];
   evaluationSummary?: string;
   category?: string;
+  status?: ReviewStatus;
 }): DeliverableReview {
   const now = new Date().toISOString();
 
@@ -157,7 +158,7 @@ export function buildNewReview(fields: {
     id: `review_${fields.issueId}_${Date.now()}`,
     issueId: fields.issueId,
     companyId: fields.companyId,
-    status: "pending_review",
+    status: fields.status ?? "pending_review",
     qualityScore: fields.qualityScore ?? 0,
     blockApproval: fields.blockApproval ?? false,
     category: (fields.category ?? "none") as QualityCategory,
