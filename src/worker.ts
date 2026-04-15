@@ -157,23 +157,33 @@ function registerData(ctx: PluginContext): void {
     const agents: import("./types.js").AgentTrend[] = [];
     let totalScore = 0;
     for (const [agentId, reviews] of Array.from(byAgent.entries())) {
-      const scores = reviews.map((r) => r.qualityScore);
+      // Sort newest first for recentScores
+      const sorted = [...reviews].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      const scores = sorted.map((r) => r.qualityScore);
       const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
       totalScore += scores.reduce((a, b) => a + b, 0);
-      const approvedCount = reviews.filter((r) => r.status === "approved").length;
-      const rejectedCount = reviews.filter((r) => r.status === "rejected").length;
-      const autoRejectedCount = reviews.filter((r) => r.status === "auto_rejected").length;
-      const needsHumanReviewCount = reviews.filter((r) => r.status === "needs_human_review").length;
+      const approvedCount = sorted.filter((r) => r.status === "approved").length;
+      const rejectedCount = sorted.filter((r) => r.status === "rejected").length;
+      const autoRejectedCount = sorted.filter((r) => r.status === "auto_rejected").length;
+      const needsHumanReviewCount = sorted.filter((r) => r.status === "needs_human_review").length;
       agents.push({
         agentId,
-        totalReviews: reviews.length,
+        displayName: agentId === "_manual_" ? "Manual Submission" : agentId,
+        totalReviews: sorted.length,
         avgQualityScore: Math.round(avgScore * 10) / 10,
         approvedCount,
         rejectedCount,
         autoRejectedCount,
         needsHumanReviewCount,
-        approvalRate: Math.round((approvedCount / reviews.length) * 1000) / 10,
-        autoRejectRate: Math.round((autoRejectedCount / reviews.length) * 1000) / 10,
+        approvalRate: Math.round((approvedCount / sorted.length) * 1000) / 10,
+        autoRejectRate: Math.round((autoRejectedCount / sorted.length) * 1000) / 10,
+        recentScores: sorted.slice(0, 10).map((r) => ({
+          score: r.qualityScore,
+          status: r.status,
+          createdAt: r.createdAt,
+        })),
       });
     }
 

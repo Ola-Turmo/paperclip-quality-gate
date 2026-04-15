@@ -202,7 +202,7 @@ export interface SubmitForReviewInput {
 
 export interface AgentTrend {
   agentId: string;
-  totalReviews: number;
+  displayName: string;
   avgQualityScore: number;
   approvedCount: number;
   rejectedCount: number;
@@ -210,8 +210,10 @@ export interface AgentTrend {
   needsHumanReviewCount: number;
   approvalRate: number;
   autoRejectRate: number;
+  totalReviews: number;
+  /** Most recent quality scores (newest first) for score history. */
+  recentScores?: { score: number; status: ReviewStatus; createdAt: string }[];
 }
-
 export interface QualityTrendsData {
   agents: AgentTrend[];
   overallAvgScore: number;
