@@ -16,7 +16,6 @@ export type QualityCategory =
   | "needs_human_review"
   | "blocked"
   | "auto_rejected"
-  | "pending_review"
   | "rejected";
 
 export interface QualityCheck {

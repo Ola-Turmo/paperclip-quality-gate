@@ -7,7 +7,6 @@ import type {
   ReviewAction,
   ReviewStatus,
 } from "./types.js";
-import { DEFAULT_CONFIG } from "./manifest.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -52,8 +51,8 @@ export function evaluateQuality(
     category = "passed";
     passed = true;
   } else {
+    // Score is between blockThreshold and minQualityScore — already handled above
     category = "needs_human_review";
-    blockThresholdBreached = true;
   }
 
   // Deterministic ±1 variance per category/score to provide varied check results
@@ -150,13 +149,9 @@ export function buildNewReview(fields: {
   reviewerName: string;
   qualityChecks?: QualityCheck[];
   evaluationSummary?: string;
+  category?: string;
 }): DeliverableReview {
   const now = new Date().toISOString();
-  const category = evaluateQuality(
-    fields.qualityScore,
-    fields.blockApproval ?? false,
-    DEFAULT_CONFIG,
-  ).category;
 
   return {
     id: `review_${fields.issueId}_${Date.now()}`,
@@ -165,7 +160,7 @@ export function buildNewReview(fields: {
     status: "pending_review",
     qualityScore: fields.qualityScore ?? 0,
     blockApproval: fields.blockApproval ?? false,
-    category,
+    category: (fields.category ?? "none") as QualityCategory,
     checks: fields.qualityChecks ?? [],
     evaluationSummary: fields.evaluationSummary ?? "",
     submitterName: fields.reviewerName,
@@ -274,10 +269,8 @@ export function mapTargetStatus(
   switch (category) {
     case "passed":
     case "needs_human_review":
-    case "pending_review":
       return "in_review";
     case "auto_rejected":
-      return "in_progress";
     case "rejected":
       return "in_progress";
     case "blocked":

@@ -214,6 +214,7 @@ const plugin = definePlugin({
           reviewerName: "User",
           qualityChecks: evaluation.checks,
           evaluationSummary: evaluation.summary,
+          category: evaluation.category,
         });
       }
 
@@ -247,6 +248,9 @@ const plugin = definePlugin({
         }
       }
 
+      if (!existingReview) {
+        ctx.streams.emit("quality_gate.review_created", { review });
+      }
       ctx.streams.emit("quality_gate.review_updated", { review });
 
       if (evaluation.autoRejected) {
@@ -592,6 +596,7 @@ const plugin = definePlugin({
             reviewerName: "Agent",
             qualityChecks: evaluation.checks,
             evaluationSummary: evaluation.summary,
+            category: evaluation.category,
           });
         }
 
@@ -606,7 +611,9 @@ const plugin = definePlugin({
               { status: targetStatus as Issue["status"] },
               companyId,
             );
-          } catch { /* non-fatal */ }
+          } catch (err) {
+            ctx.logger.warn("submit_for_review: failed to update issue status", { error: String(err) });
+          }
           try {
             await ctx.issues.createComment(
               issueId,
@@ -618,7 +625,28 @@ const plugin = definePlugin({
               }),
               companyId,
             );
-          } catch { /* non-fatal */ }
+          } catch (err) {
+            ctx.logger.warn("submit_for_review: failed to post comment", { error: String(err) });
+          }
+        }
+
+        if (!existingReview) {
+          ctx.streams.emit("quality_gate.review_created", { review });
+        }
+        ctx.streams.emit("quality_gate.review_updated", { review });
+
+        if (evaluation.autoRejected) {
+          ctx.streams.emit("quality_gate.threshold_breached", {
+            review,
+            score: evaluation.overallScore,
+            reason: "auto_rejected",
+          });
+        } else if (evaluation.blockThresholdBreached) {
+          ctx.streams.emit("quality_gate.threshold_breached", {
+            review,
+            score: evaluation.overallScore,
+            reason: "block_threshold",
+          });
         }
 
         const emoji = review.status === "auto_rejected" ? "⚠️"
@@ -684,11 +712,19 @@ const plugin = definePlugin({
       const cfg = await getConfig(ctx);
       const evaluation = evaluateQuality(qualityScore, blockApproval ?? false, cfg);
 
+      // Determine new review status from evaluation (not the old status)
+      let reviewStatus: ReviewStatus = "pending_review";
+      if (evaluation.autoRejected) {
+        reviewStatus = "auto_rejected";
+      } else if (evaluation.blockThresholdBreached) {
+        reviewStatus = "needs_human_review";
+      }
+
       // Check if review already exists
       let review = await getReview(ctx, issueId);
-      const isResubmission = review !== null;
+      const isNew = review === null;
 
-      if (!review) {
+      if (isNew) {
         review = buildNewReview({
           issueId,
           companyId,
@@ -698,9 +734,10 @@ const plugin = definePlugin({
           reviewerName: "Agent",
           qualityChecks: evaluation.checks,
           evaluationSummary: evaluation.summary,
+          category: evaluation.category,
         });
       } else {
-        review = updateReviewStatus(review, review.status, {
+        review = updateReviewStatus(review!, reviewStatus, {
           action: `auto-evaluated after agent.run.finished (resumed)`,
           reviewer: "agent",
           reviewerName: "System",
@@ -758,6 +795,9 @@ const plugin = definePlugin({
         // metrics not available
       }
 
+      if (isNew) {
+        ctx.streams.emit("quality_gate.review_created", { review });
+      }
       ctx.streams.emit("quality_gate.review_updated", { review });
 
       ctx.logger.info("agent.run.finished: auto-gate complete", {
@@ -766,6 +806,19 @@ const plugin = definePlugin({
         score: evaluation.overallScore,
         category: evaluation.category,
         status: review.status,
+      });
+    });
+
+    /**
+     * agent.run.failed — log failed runs; skip auto-gate since no deliverable was produced.
+     */
+    ctx.events.on("agent.run.failed", async (event: PluginEvent) => {
+      const runId = event.entityId ?? "";
+      const companyId = event.companyId ?? "";
+      ctx.logger.info("agent.run.failed observed", {
+        runId,
+        companyId,
+        event: event.payload,
       });
     });
 
