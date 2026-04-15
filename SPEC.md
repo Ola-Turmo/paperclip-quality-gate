@@ -18,17 +18,42 @@ or run agents. Those are owned by other plugins or by Paperclip itself.
 
 ---
 
-## 2. Protocol — Plugin API Surface
+## 2. Architecture
+
+```
+src/
+├── manifest.ts       — Plugin identity, ID, version, capabilities
+├── worker.ts         — Thin orchestration layer + data registrations (221 lines)
+├── actions.ts       — Action handlers: submit / approve / reject / assign / bulk_* (445 lines)
+├── events.ts        — Event subscriptions: agent.run.* / issue.* (230 lines)
+├── tools.ts         — Agent tools: quality_gate_review / submit_for_review (269 lines)
+├── helpers.ts       — Pure evaluation, review building, comment formatting (387 lines)
+├── shared.ts        — Runtime helpers needing PluginContext: castParams, getConfig, getReview, putReview
+├── types.ts         — All TypeScript interfaces (221 lines)
+└── ui/
+    ├── index.tsx             — UI entry point
+    ├── QualityGateTab.tsx    — Issue-detail review panel (React)
+    └── settings.tsx          — Settings panel (React)
+```
+
+**Architecture pattern:** Clean separation — pure logic in `helpers.ts` (no side effects, fully testable), side-effectful orchestration in `actions.ts` / `events.ts`, UI in React.
+
+---
+
+## 3. Protocol — Plugin API Surface
 
 All namespaced under `quality_gate.*`. All payloads are versioned.
 
-### 2.1 Actions (bridge: UI → plugin worker)
+### 3.1 Actions (bridge: UI → plugin worker)
 
 | Action key | Trigger | Description |
 |---|---|---|
 | `quality_gate.submit` | reviewer / agent | Submit a deliverable for quality review |
 | `quality_gate.approve` | reviewer | Approve a deliverable — marks issue `done` |
 | `quality_gate.reject` | reviewer | Reject a deliverable — marks issue `in_progress` |
+| `quality_gate.assign` | reviewer | Reassign a review to a different reviewer |
+| `quality_gate.bulk_approve` | reviewer | Approve multiple deliverables at once |
+| `quality_gate.bulk_reject` | reviewer | Reject multiple deliverables at once |
 
 #### `quality_gate.submit`
 
@@ -39,7 +64,7 @@ All namespaced under `quality_gate.*`. All payloads are versioned.
   summary?:      string;   // deliverable summary (from agent)
   quality_score?: number;  // 0-10 agent self-assessed score
   block_approval?: boolean; // true = force human review regardless of score
-  comment?:      string;   // optional reviewer comment
+  comment?:     string;   // optional reviewer comment
 }
 ```
 
@@ -55,15 +80,40 @@ All namespaced under `quality_gate.*`. All payloads are versioned.
 { issue_id: string; comment: string }
 ```
 
-### 2.2 Data (bridge: UI widget → plugin worker)
+#### `quality_gate.assign`
+
+```ts
+{ issue_id: string; assigned_to: string }
+```
+
+Idempotent: reassigning to the same person is a no-op.
+
+#### `quality_gate.bulk_approve`
+
+```ts
+{ issue_ids: string[]; comment?: string }
+```
+
+Processes up to 5 approvals concurrently.
+
+#### `quality_gate.bulk_reject`
+
+```ts
+{ issue_ids: string[]; comment: string }
+```
+
+Processes up to 5 rejections concurrently.
+
+### 3.2 Data (bridge: UI widget → plugin worker)
 
 | Data key | Returns |
 |---|---|
 | `quality_gate.review` | `ReviewStatusData` for one issue |
-| `quality_gate.reviews` | `ReviewStatusData[]` for all known reviews |
+| `quality_gate.reviews` | `ReviewsListData` for all known reviews |
 | `quality_gate.config` | Current `QualityGateSettings` |
+| `quality_gate.trends` | `QualityTrendsData` — per-agent analytics |
 
-### 2.3 Events subscribed (plugin ← Paperclip host)
+### 3.3 Events subscribed (plugin ← Paperclip host)
 
 | Event | When |
 |---|---|
@@ -72,7 +122,7 @@ All namespaced under `quality_gate.*`. All payloads are versioned.
 | `agent.run.finished` | Agent run completed — **auto-triggers quality evaluation** |
 | `agent.run.failed` | Agent run crashed — log and skip auto-gate |
 
-### 2.4 Streams emitted (plugin → Paperclip host / other plugins)
+### 3.4 Streams emitted (plugin → Paperclip host / other plugins)
 
 | Channel | Payload |
 |---|---|
@@ -86,12 +136,12 @@ Any other plugin can subscribe to these channels via `ctx.streams.on`.
 
 ---
 
-## 3. State Model
+## 4. State Model
 
 Reviews are stored at **per-issue scope**:
 
 ```
-{ scopeKind: "issue", scopeId: <issueId>, stateKey: "review" }
+{ scopeKind: "issue", scopeId: <issueId>, stateKey: "reviews" }
   → DeliverableReview
 ```
 
@@ -101,12 +151,12 @@ The plugin also stores a company-level index of known review IDs:
 
 ```
 { scopeKind: "company", scopeId: <companyId>, stateKey: "review_ids" }
-  → string[]  (ordered by last-updated)
+  → string[]  (ordered by last-updated, capped at 200)
 ```
 
 ---
 
-## 4. Review Lifecycle
+## 5. Review Lifecycle
 
 ```
 issue.created
@@ -148,27 +198,63 @@ issue.created
 
 ---
 
-## 5. Evaluation Algorithm
+## 6. Evaluation Algorithm
 
-`evaluateQuality(score, config)`:
+`evaluateQuality(score, blockApproval, config, issueData?)` returns a `QualityEvaluation`:
 
 ```
 category:
-  score == null          → "none"
-  score >= min           → "passed"
-  score >= blockThreshold → "needs_human_review"
-  score >= autoRejectBelow → "blocked"
-  score <  autoRejectBelow → "auto_rejected"
+  score == null/undefined         → "none"
+  score <  autoRejectBelow        → "auto_rejected"
+  blockApproval || score <= block  → "needs_human_review"
+  score >= minQualityScore         → "passed"
+  score between block and min      → "needs_human_review"
 
-variance: deterministic ±1 from djb2(category + string(score))
-finalScore: clamp(baseScore + variance, 0, 10)
+variant: deterministic ±1 from djb2(category + string(score))
+overallScore: clamp(baseScore + variant, 0, 10)
+
+checks:
+  - score_threshold  — did the score meet the minimum?
+  - no_blockers      — any blocking flags?
+  - auto_reject       — was auto-reject triggered?
+  - [custom checks]   — from plugin config, evaluated against issue metadata
+
+summary: human-readable quality summary string
+autoRejected: boolean
+blockThresholdBreached: boolean
+passed: boolean
 ```
 
 Evaluation always runs deterministically — same inputs always produce same outputs.
 
+### Custom Checks
+
+Custom checks are structured rules defined in plugin config (`QualityGateSettings.customChecks`).
+Each check is evaluated against the issue's live metadata (labels, title, assignee).
+
+| Check type | Condition |
+|---|---|
+| `label_required` | Issue has the required label |
+| `label_missing` | Issue does NOT have the forbidden label |
+| `title_contains` | Issue title contains all specified keywords |
+| `has_assignee` | Issue has any assignee |
+
 ---
 
-## 6. Tool Definitions (for Paperclip agents)
+## 7. Configuration (instanceConfigSchema)
+
+```ts
+interface QualityGateSettings {
+  minQualityScore:   number;        // default 7
+  blockThreshold:    number;        // default 5
+  autoRejectBelow:    number;        // default 3
+  customChecks?:      CustomCheck[]; // structured rules evaluated at every review
+}
+```
+
+---
+
+## 8. Tool Definitions (for Paperclip agents)
 
 ### `quality_gate_review`
 
@@ -188,35 +274,93 @@ description: Submit a completed deliverable for quality gate review.
 parameters:
   issue_id:      { type: string, required: true }
   summary:       { type: string }
-  quality_score: { type: number }
+  quality_score:  { type: number }
   block_approval: { type: boolean }
   comment:       { type: string }
 ```
 
 ---
 
-## 7. Configuration (instanceConfigSchema)
+## 9. Event Payloads
+
+### `agent.run.finished`
+
+The plugin correlates the `runId` (from `event.entityId`) to an issue by matching
+`executionRunId` or `checkoutRunId` on the issue. It then auto-evaluates:
 
 ```ts
-interface QualityGateSettings {
-  minQualityScore:   number;  // default 7
-  blockThreshold:    number;  // default 5
-  autoRejectBelow:   number;  // default 3
+interface AgentRunFinishedEvent {
+  agentId: string;
+  status: "completed" | "failed" | "cancelled";
+  summary?: string;
+  qualityScore?: number;
+  blockApproval?: boolean;
+}
+```
+
+### `agent.run.failed`
+
+```ts
+// Logged only — no auto-gate triggered since no deliverable was produced.
+```
+
+---
+
+## 10. DeliverableReview Shape
+
+```ts
+interface DeliverableReview {
+  id:               string;       // format: review_<issueId>_<uuid>
+  issueId:          string;
+  companyId:        string;
+  status:           ReviewStatus;
+  qualityScore:     number;       // 0-10 (with ±1 deterministic variance)
+  blockApproval:    boolean;
+  category:         QualityCategory;
+  checks:           QualityCheck[];
+  evaluationSummary: string;
+  submitterName:    string;
+  agentId?:         string;       // set on auto-evaluated reviews
+  assignedTo?:      string;       // set by quality_gate.assign
+  history:          ReviewAction[]; // capped at 50 entries
+  createdAt:        string;       // ISO 8601
+  updatedAt:        string;       // ISO 8601
 }
 ```
 
 ---
 
-## 8. Versioning Policy
+## 11. Trend Analytics
 
-- **Semver** from v1.0.0 — patch = bugfix, minor = additive, major = breaking
-- Protocol (action/data keys, event channels, payload shapes) is the public API
-- Internal helpers, state key names, and implementation details may change
-- Breaking changes to the protocol require a major version bump + migration guide
+`quality_gate.trends` returns per-agent quality statistics:
+
+```ts
+interface AgentTrend {
+  agentId:            string;
+  displayName:        string;
+  avgQualityScore:    number;
+  approvedCount:      number;
+  rejectedCount:      number;
+  autoRejectedCount:  number;
+  needsHumanReviewCount: number;
+  approvalRate:       number;      // percentage
+  autoRejectRate:     number;     // percentage
+  totalReviews:       number;
+  recentScores?:      { score: number; status: ReviewStatus; createdAt: string }[];
+}
+
+interface QualityTrendsData {
+  agents:           AgentTrend[];
+  overallAvgScore:  number;
+  totalReviews:     number;
+}
+```
+
+Agents with no `agentId` are grouped under `_manual_` (Manual Submission).
 
 ---
 
-## 9. Error Handling
+## 12. Error Handling
 
 | Error | Behavior |
 |---|---|
@@ -228,7 +372,7 @@ interface QualityGateSettings {
 
 ---
 
-## 10. Integration Contract
+## 13. Integration Contract
 
 Other UOS plugins consume `uos-quality-gate` by:
 
@@ -239,7 +383,15 @@ Other UOS plugins consume `uos-quality-gate` by:
 
 ---
 
-## 11. Canonical Source of Truth
+## 14. Versioning Policy
+
+- **Semver** from v1.0.0 — patch = bugfix, minor = additive, major = breaking
+- Protocol (action/data keys, event channels, payload shapes) is the public API
+- Internal helpers, state key names, and implementation details may change
+- Breaking changes to the protocol require a major version bump + migration guide
+
+---
+
+## 15. Canonical Source of Truth
 
 `github.com/Ola-Turmo/uos-quality-gate` — all other copies are mirrors.
-
