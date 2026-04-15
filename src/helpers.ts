@@ -15,6 +15,9 @@ export const STATE_KEYS = {
   REVIEW_IDS: "review_ids",    // per-company: string[]
 } as const;
 
+/** Maximum history entries stored per review to prevent unbounded growth. */
+const MAX_HISTORY_ENTRIES = 50;
+
 // ── Deterministic hash (djb2) ───────────────────────────────────────────────
 
 function djb2(str: string): number {
@@ -155,7 +158,7 @@ export function buildNewReview(fields: {
   const now = new Date().toISOString();
 
   return {
-    id: `review_${fields.issueId}_${Date.now()}`,
+    id: `review_${fields.issueId}_${crypto.randomUUID()}`,
     issueId: fields.issueId,
     companyId: fields.companyId,
     status: fields.status ?? "pending_review",
@@ -186,14 +189,15 @@ export function updateReviewStatus(
   action: Omit<ReviewAction, "createdAt">,
 ): DeliverableReview {
   const now = new Date().toISOString();
+  // Cap history at MAX_HISTORY_ENTRIES to prevent unbounded growth
+  const nextHistory = [...review.history, { ...action, createdAt: now }].slice(
+    -MAX_HISTORY_ENTRIES,
+  );
   return {
     ...review,
     status,
     updatedAt: now,
-    history: [
-      ...review.history,
-      { ...action, createdAt: now },
-    ],
+    history: nextHistory,
   };
 }
 

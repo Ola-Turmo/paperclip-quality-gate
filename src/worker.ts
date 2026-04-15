@@ -37,6 +37,16 @@ import type { DeliverableReview, ReviewStatus, ReviewStatusData } from "./types.
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Type-safe params cast for action handlers.
+ * The SDK passes params as Record<string, unknown>, but we know the shape at runtime.
+ * Using as unknown as to suppress TypeScript's conservative overlap check — safe because
+ * the action schema enforces required fields at registration time.
+ */
+function castParams<T>(params: Record<string, unknown>): T {
+  return params as unknown as T;
+}
+
 async function getConfig(ctx: PluginContext): Promise<QualityGateSettings> {
   const config = await ctx.config.get();
   return { ...DEFAULT_CONFIG, ...(config as Partial<QualityGateSettings>) };
@@ -126,31 +136,46 @@ const plugin = definePlugin({
         stateKey: STATE_KEYS.REVIEW_IDS,
       })) as string[] | null) ?? [];
 
-      const reviews: ReviewStatusData[] = [];
-      for (const reviewId of ids.slice(0, 50)) {
-        const parts = reviewId.split("_");
-        const issueId = parts[1];
-        if (!issueId) continue;
+      const idslice = ids.slice(0, 50);
 
-        try {
-          const review = await getReview(ctx, issueId);
-          if (!review) continue;
-          let issue: Issue | null = null;
-          try {
-            issue = await ctx.issues.get(issueId, companyId);
-          } catch {
-            // issue deleted — still surface the review
-          }
-          reviews.push({
-            review,
-            issue: issue ? { id: issue.id, title: issue.title, status: issue.status ?? "" } : undefined,
-          });
-        } catch {
-          // skip corrupted review
+      // Parallel fetch with concurrency limit of 10
+      const CONCURRENCY = 10;
+      const results: ReviewStatusData[] = [];
+      for (let i = 0; i < idslice.length; i += CONCURRENCY) {
+        const batch = idslice.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(
+          batch.map(async (reviewId): Promise<ReviewStatusData | null> => {
+            const parts = reviewId.split("_");
+            const issueId = parts[1];
+            if (!issueId) return null;
+
+            try {
+              const review = await getReview(ctx, issueId);
+              if (!review) return null;
+              let issue: Issue | null = null;
+              try {
+                issue = await ctx.issues.get(issueId, companyId);
+              } catch {
+                // issue deleted — still surface the review
+              }
+              return {
+                review,
+                issue: issue
+                  ? { id: issue.id, title: issue.title, status: issue.status ?? "" }
+                  : undefined,
+              } as ReviewStatusData;
+            } catch {
+              // skip corrupted review
+              return null;
+            }
+          }),
+        );
+        for (const r of batchResults) {
+          if (r) results.push(r);
         }
       }
 
-      return { reviews, total: ids.length } as ReviewsListData;
+      return { reviews: results, total: ids.length } as ReviewsListData;
     });
 
     // ── Action registrations ─────────────────────────────────────────────────
@@ -160,7 +185,7 @@ const plugin = definePlugin({
      * Idempotent: submitting the same issue again updates the existing review.
      */
     ctx.actions.register("quality_gate.submit", async (params) => {
-      const p = params as unknown as SubmitForReviewParams;
+      const p = castParams<SubmitForReviewParams>(params);
       const issueId = p.issue_id;
       if (!issueId) {
         return { ok: false, error: "issue_id is required" } as ActionResult;
@@ -282,7 +307,7 @@ const plugin = definePlugin({
      * Idempotent: double-approve is a no-op, not an error.
      */
     ctx.actions.register("quality_gate.approve", async (params) => {
-      const p = params as unknown as ApproveParams;
+      const p = castParams<ApproveParams>(params);
       const issueId = p.issue_id;
       if (!issueId) {
         return { ok: false, error: "issue_id is required" } as ActionResult;
@@ -355,7 +380,7 @@ const plugin = definePlugin({
      * Idempotent: double-reject is a no-op.
      */
     ctx.actions.register("quality_gate.reject", async (params) => {
-      const p = params as unknown as RejectParams;
+      const p = castParams<RejectParams>(params);
       const issueId = p.issue_id;
       if (!issueId) {
         return { ok: false, error: "issue_id is required" } as ActionResult;
