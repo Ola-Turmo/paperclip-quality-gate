@@ -66,6 +66,7 @@ export interface DeliverableReview {
   checks: QualityCheck[];
   evaluationSummary: string;
   submitterName: string;
+  agentId?: string;
   assignedTo?: string;
   history: ReviewAction[];
   createdAt: string;
@@ -165,4 +166,24 @@ export interface SubmitForReviewInput {
   quality_score?: number;
   block_approval?: boolean;
   comment?: string;
+}
+
+// ── Trend analytics ──────────────────────────────────────────────────────────
+
+export interface AgentTrend {
+  agentId: string;
+  totalReviews: number;
+  avgQualityScore: number;
+  approvedCount: number;
+  rejectedCount: number;
+  autoRejectedCount: number;
+  needsHumanReviewCount: number;
+  approvalRate: number;
+  autoRejectRate: number;
+}
+
+export interface QualityTrendsData {
+  agents: AgentTrend[];
+  overallAvgScore: number;
+  totalReviews: number;
 }

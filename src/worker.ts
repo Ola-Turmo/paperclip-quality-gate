@@ -12,7 +12,7 @@
 import { definePlugin, runWorker, type PluginContext } from "@paperclipai/plugin-sdk";
 import type { Issue } from "@paperclipai/plugin-sdk";
 import { PLUGIN_ID, PLUGIN_VERSION } from "./manifest.js";
-import type { ReviewsListData } from "./types.js";
+import type { QualityTrendsData, ReviewsListData } from "./types.js";
 import { STATE_KEYS } from "./helpers.js";
 import { setupActions } from "./actions.js";
 import { setupTools } from "./tools.js";
@@ -107,6 +107,84 @@ function registerData(ctx: PluginContext): void {
     }
 
     return { reviews: results, total: ids.length } as ReviewsListData;
+  });
+
+  ctx.data.register("quality_gate.trends", async (params) => {
+    const companyId = (params["companyId"] as string) ?? "";
+    if (!companyId) return { agents: [], overallAvgScore: 0, totalReviews: 0 } as QualityTrendsData;
+
+    const ids = ((await ctx.state.get({
+      scopeKind: "company" as const,
+      scopeId: companyId,
+      stateKey: STATE_KEYS.REVIEW_IDS,
+    })) as string[] | null) ?? [];
+
+    // Fetch all reviews in parallel batches
+    const CONCURRENCY = 10;
+    const allReviews: import("./types.js").DeliverableReview[] = [];
+    for (let i = 0; i < ids.length; i += CONCURRENCY) {
+      const batch = ids.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(async (reviewId) => {
+          const parts = reviewId.split("_");
+          const issueId = parts[1];
+          if (!issueId) return null;
+          try {
+            return await getReview(ctx, issueId);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const r of batchResults) {
+        if (r) allReviews.push(r);
+      }
+    }
+
+    if (allReviews.length === 0) {
+      return { agents: [], overallAvgScore: 0, totalReviews: 0 } as QualityTrendsData;
+    }
+
+    // Group reviews by agentId
+    const byAgent = new Map<string, import("./types.js").DeliverableReview[]>();
+    for (const review of allReviews) {
+      const key = review.agentId ?? "_manual_";
+      if (!byAgent.has(key)) byAgent.set(key, []);
+      byAgent.get(key)!.push(review);
+    }
+
+    // Compute per-agent trends
+    const agents: import("./types.js").AgentTrend[] = [];
+    let totalScore = 0;
+    for (const [agentId, reviews] of Array.from(byAgent.entries())) {
+      const scores = reviews.map((r) => r.qualityScore);
+      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+      totalScore += scores.reduce((a, b) => a + b, 0);
+      const approvedCount = reviews.filter((r) => r.status === "approved").length;
+      const rejectedCount = reviews.filter((r) => r.status === "rejected").length;
+      const autoRejectedCount = reviews.filter((r) => r.status === "auto_rejected").length;
+      const needsHumanReviewCount = reviews.filter((r) => r.status === "needs_human_review").length;
+      agents.push({
+        agentId,
+        totalReviews: reviews.length,
+        avgQualityScore: Math.round(avgScore * 10) / 10,
+        approvedCount,
+        rejectedCount,
+        autoRejectedCount,
+        needsHumanReviewCount,
+        approvalRate: Math.round((approvedCount / reviews.length) * 1000) / 10,
+        autoRejectRate: Math.round((autoRejectedCount / reviews.length) * 1000) / 10,
+      });
+    }
+
+    // Sort agents by totalReviews descending
+    agents.sort((a, b) => b.totalReviews - a.totalReviews);
+
+    return {
+      agents,
+      overallAvgScore: Math.round((totalScore / allReviews.length) * 10) / 10,
+      totalReviews: allReviews.length,
+    } as QualityTrendsData;
   });
 }
 

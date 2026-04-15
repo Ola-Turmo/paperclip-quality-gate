@@ -150,6 +150,7 @@ export function buildNewReview(fields: {
   qualityScore?: number;
   blockApproval?: boolean;
   reviewerName: string;
+  agentId?: string;
   qualityChecks?: QualityCheck[];
   evaluationSummary?: string;
   category?: string;
@@ -168,6 +169,7 @@ export function buildNewReview(fields: {
     checks: fields.qualityChecks ?? [],
     evaluationSummary: fields.evaluationSummary ?? "",
     submitterName: fields.reviewerName,
+    agentId: fields.agentId,
     history: [
       {
         action: "submitted",

@@ -82,6 +82,7 @@ async function handleAgentRunFinished(event: PluginEvent, ctx: PluginContext): P
       qualityScore: evaluation.overallScore,
       blockApproval: blockApproval ?? false,
       reviewerName: "Agent",
+      agentId,
       qualityChecks: evaluation.checks,
       evaluationSummary: evaluation.summary,
       category: evaluation.category,
