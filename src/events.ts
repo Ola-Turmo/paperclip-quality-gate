@@ -60,7 +60,25 @@ async function handleAgentRunFinished(event: PluginEvent, ctx: PluginContext): P
   }
 
   const cfg = await getConfig(ctx);
-  const evaluation = evaluateQuality(qualityScore, blockApproval ?? false, cfg);
+
+  // Extract issue metadata for custom checks evaluation
+  let issueData: { labels?: string[]; title?: string; assignee?: string } | undefined;
+  if (issueId) {
+    try {
+      const issue = await ctx.issues.get(issueId, companyId);
+      if (issue) {
+        issueData = {
+          labels: (issue as unknown as { labels?: string[] }).labels,
+          title: issue.title,
+          assignee: (issue as unknown as { assignee?: string }).assignee,
+        };
+      }
+    } catch {
+      // issue may have been deleted — custom checks silently skipped
+    }
+  }
+
+  const evaluation = evaluateQuality(qualityScore, blockApproval ?? false, cfg, issueData);
 
   // Determine new review status from evaluation (not the old status)
   let reviewStatus: ReviewStatus = "pending_review";

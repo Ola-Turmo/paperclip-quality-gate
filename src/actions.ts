@@ -43,11 +43,20 @@ async function handleSubmit(
 
   const cfg = await getConfig(ctx);
 
+  // Extract issue metadata for custom checks while also getting companyId
   let companyId = "";
   let existingReview: DeliverableReview | null = null;
+  let issueData: { labels?: string[]; title?: string; assignee?: string } | undefined;
   try {
     const issue = await ctx.issues.get(issueId, "");
     companyId = issue?.companyId ?? "";
+    if (issue) {
+      issueData = {
+        labels: (issue as unknown as { labels?: string[] }).labels,
+        title: issue.title,
+        assignee: (issue as unknown as { assignee?: string }).assignee,
+      };
+    }
     if (companyId) {
       existingReview = await getReview(ctx, issueId);
     }
@@ -56,7 +65,7 @@ async function handleSubmit(
     return { ok: false, error: "Issue not found" } as ActionResult;
   }
 
-  const evaluation = evaluateQuality(p.quality_score, p.block_approval ?? false, cfg);
+  const evaluation = evaluateQuality(p.quality_score, p.block_approval ?? false, cfg, issueData);
 
   let reviewStatus: ReviewStatus = "pending_review";
   if (evaluation.autoRejected) {

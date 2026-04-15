@@ -2,13 +2,43 @@ import type { Issue, IssueComment } from "@paperclipai/shared";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
+/**
+ * Custom quality checks — defined in plugin config, evaluated at review time.
+ * Each check is a structured rule (no arbitrary code execution).
+ * Custom checks are evaluated against the issue's current metadata (labels, title, assignee).
+ */
+export interface CustomCheck {
+  id: string;
+  name: string;
+  /** The type of check — determines which fields of `params` are used. */
+  type:
+    | "label_required"    // params.value = label name
+    | "label_missing"     // params.value = label name
+    | "title_contains"    // params.value = comma-separated keywords
+    | "has_assignee";     // no params needed
+  /** Type-specific parameter value. */
+  value?: string;
+  /** Score contribution (0–10) when passed. Defaults to 0. */
+  scoreBonus?: number;
+}
+
 export interface QualityGateSettings {
   minQualityScore: number;
   blockThreshold: number;
   autoRejectBelow: number;
+  /** Structured custom checks evaluated at every review. */
+  customChecks?: CustomCheck[];
 }
 
-// ── Evaluation ──────────────────────────────────────────────────────────────
+/**
+ * Issue metadata used during custom check evaluation.
+ * Populated at evaluation time from the live issue object.
+ */
+export interface IssueMetadata {
+  labels?: string[];
+  title?: string;
+  assignee?: string;
+}
 
 export type QualityCategory =
   | "none"

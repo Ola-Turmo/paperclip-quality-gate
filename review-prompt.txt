@@ -1,0 +1,74 @@
+Review this codebase at /tmp/uos-quality-gate and produce a complete Product Requirements Document as a single Markdown file named `codebase_review_prd.md`.
+
+Your objectives:
+
+1. Find bugs, broken logic, incomplete implementations, stubbed functions, placeholder code, dead code, obvious mistakes, hidden risks, and reliability issues.
+2. Identify code quality problems, including weak abstractions, technical debt, poor separation of concerns, maintainability issues, test gaps, security concerns, observability gaps, and architectural weaknesses.
+3. Recommend what would be required to raise this codebase to a world-class standard in:
+   - performance
+   - functionality
+   - developer experience
+   - reliability
+   - scalability
+   - maintainability
+4. Identify higher-level automation opportunities across:
+   - testing
+   - CI/CD
+   - code review
+   - deployment
+   - monitoring
+   - alerting
+   - incident response
+   - documentation
+   - refactoring workflows
+   - runtime operations
+5. Identify realistic and safe opportunities for the system to improve over time using:
+   - feedback loops
+   - evaluation pipelines
+   - adaptive behavior
+   - automated tuning
+   - data-driven prioritization
+   - controlled self-improvement or learning systems
+
+Instructions:
+- Inspect the codebase thoroughly before drawing conclusions.
+- Be concrete and technical, not vague.
+- Prioritize findings by severity, impact, and implementation effort.
+- Separate confirmed issues from inferred opportunities.
+- Where useful, reference specific files, modules, components, or patterns.
+- Suggest improvements that are practical, high-leverage, and production-grade.
+- Think both as a staff engineer and as a product/technical strategist.
+
+Output requirements:
+Create a Markdown PRD with this structure:
+
+# Product Requirements Document: Codebase Review and World-Class Upgrade Plan
+
+## 1. Executive Summary
+## 2. Current-State Assessment
+## 3. Critical Bugs and Defects
+## 4. Incomplete, Stubbed, or Fragile Areas
+## 5. Architecture and Code Quality Review
+## 6. Performance Improvement Opportunities
+## 7. Functional Enhancement Opportunities
+## 8. Automation Opportunities
+## 9. Self-Improvement and Learning Opportunities
+## 10. Risks, Constraints, and Assumptions
+## 11. Prioritized Roadmap
+## 12. Recommended Next Steps
+
+For each major finding include:
+- title
+- description
+- why it matters
+- severity
+- expected impact
+- effort estimate
+- recommended action
+
+At the end, include:
+- a top 10 priority list
+- a phased roadmap: immediate, near-term, strategic
+- the single highest-leverage set of changes to make first
+
+Do not just summarize the code. Produce an opinionated PRD that explains what should change to make the system significantly better.

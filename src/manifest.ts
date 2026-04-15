@@ -8,6 +8,7 @@ export const DEFAULT_CONFIG: QualityGateSettings = {
   minQualityScore: 7,
   blockThreshold: 5,
   autoRejectBelow: 3,
+  customChecks: [],
 };
 
 const manifest: PaperclipPluginManifestV1 = {
@@ -82,6 +83,52 @@ const manifest: PaperclipPluginManifestV1 = {
         description:
           "Scores strictly below this value are automatically rejected " +
           "without human review. Agent should fix and resubmit.",
+      },
+      customChecks: {
+        type: "array",
+        default: [],
+        title: "Custom Quality Checks",
+        description:
+          "Structured rules evaluated at every review. " +
+          "Types: label_required (value=labelName), label_missing (value=labelName), " +
+          "title_contains (value=comma,kewords), has_assignee. " +
+          "Each check contributes scoreBonus points when passed.",
+        items: {
+          type: "object",
+          required: ["id", "name", "type"],
+          properties: {
+            id: {
+              type: "string",
+              title: "Check ID",
+              description: "Unique identifier for this check (used as prefix in results)",
+            },
+            name: {
+              type: "string",
+              title: "Display Name",
+              description: "Human-readable name shown in the review checks list",
+            },
+            type: {
+              type: "string",
+              enum: ["label_required", "label_missing", "title_contains", "has_assignee"],
+              title: "Check Type",
+            },
+            value: {
+              type: "string",
+              title: "Value",
+              description:
+                "Type-specific value: label name for label_* types, " +
+                "comma-separated keywords for title_contains, unused for has_assignee",
+            },
+            scoreBonus: {
+              type: "number",
+              minimum: 0,
+              maximum: 10,
+              default: 0,
+              title: "Score Bonus",
+              description: "Points added to quality score when this check passes (0–10)",
+            },
+          },
+        },
       },
     },
   },

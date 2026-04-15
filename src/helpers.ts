@@ -1,5 +1,7 @@
 import type {
+  CustomCheck,
   DeliverableReview,
+  IssueMetadata,
   QualityCategory,
   QualityCheck,
   QualityEvaluation,
@@ -28,12 +30,13 @@ function djb2(str: string): number {
   return Math.abs(hash);
 }
 
-// ── Quality evaluation ──────────────────────────────────────────────────────
+// ── Quality evaluation ───────────────────────────────────────────────────────
 
 export function evaluateQuality(
   score: number | undefined,
   blockApproval: boolean,
   config: QualityGateSettings,
+  issueData?: IssueMetadata,
 ): QualityEvaluation {
   const base = score ?? 0;
 
@@ -65,9 +68,81 @@ export function evaluateQuality(
   // Build per-category check breakdown
   const checks: QualityCheck[] = buildChecks(overallScore, category, score, blockApproval ?? false);
 
+  // Evaluate custom checks (structured rules from plugin config)
+  const customChecks = config.customChecks ?? [];
+  for (const check of customChecks) {
+    const result = evaluateCustomCheck(check, issueData);
+    checks.push(result);
+  }
+
   const summary = buildSummary(overallScore, category, autoRejected, blockThresholdBreached, passed, score);
 
   return { overallScore, category, checks, summary, autoRejected, blockThresholdBreached, passed } as QualityEvaluation;
+}
+
+/**
+ * Evaluate a single structured custom check against issue metadata.
+ * Returns a QualityCheck result (passed/failed with score contribution).
+ */
+function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): QualityCheck {
+  let passed = false;
+  let details = "";
+  const labels = issueData?.labels ?? [];
+  const title = issueData?.title ?? "";
+  const assignee = issueData?.assignee;
+
+  switch (check.type) {
+    case "label_required": {
+      const required = check.value ?? "";
+      passed = labels.some((l) => l.toLowerCase() === required.toLowerCase());
+      details = passed
+        ? `Required label "${required}" is present`
+        : `Required label "${required}" is missing`;
+      break;
+    }
+    case "label_missing": {
+      const forbidden = check.value ?? "";
+      passed = !labels.some((l) => l.toLowerCase() === forbidden.toLowerCase());
+      details = passed
+        ? `Label "${forbidden}" is correctly absent`
+        : `Label "${forbidden}" should not be present`;
+      break;
+    }
+    case "title_contains": {
+      const keywords = (check.value ?? "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean);
+      if (keywords.length === 0) {
+        passed = true;
+        details = "No keywords configured";
+      } else {
+        const titleLower = title.toLowerCase();
+        const matched = keywords.filter((k) => titleLower.includes(k));
+        passed = matched.length === keywords.length;
+        details = passed
+          ? `Title contains all required keywords: ${matched.join(", ")}`
+          : `Title missing keywords: ${keywords.filter((k) => !matched.includes(k)).join(", ")}`;
+      }
+      break;
+    }
+    case "has_assignee": {
+      passed = Boolean(assignee && assignee.trim() !== "");
+      details = passed
+        ? `Issue is assigned to ${assignee}`
+        : "Issue has no assignee";
+      break;
+    }
+    default: {
+      details = `Unknown check type`;
+      break;
+    }
+  }
+
+  return {
+    id: `custom_${check.id}`,
+    name: check.name,
+    passed,
+    score: passed ? (check.scoreBonus ?? 0) : 0,
+    details,
+  };
 }
 
 function buildChecks(
