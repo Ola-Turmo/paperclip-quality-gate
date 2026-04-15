@@ -109,7 +109,7 @@ Processes up to 5 rejections concurrently.
 | Data key | Returns |
 |---|---|
 | `quality_gate.review` | `ReviewStatusData` for one issue |
-| `quality_gate.reviews` | `ReviewsListData` for all known reviews |
+| `quality_gate.reviews` | `ReviewsListData` for all known reviews (capped at 50 most recent) |
 | `quality_gate.config` | Current `QualityGateSettings` |
 | `quality_gate.trends` | `QualityTrendsData` — per-agent analytics |
 
@@ -130,7 +130,8 @@ Processes up to 5 rejections concurrently.
 | `quality_gate.review_updated` | `{ review: DeliverableReview }` |
 | `quality_gate.review_approved` | `{ review: DeliverableReview }` |
 | `quality_gate.review_rejected` | `{ review: DeliverableReview }` |
-| `quality_gate.threshold_breached` | `{ review: DeliverableReview; score: number }` |
+| `quality_gate.review_assigned` | `{ review: DeliverableReview }` |
+| `quality_gate.threshold_breached` | `{ review: DeliverableReview; score: number; reason: "auto_rejected" | "block_threshold" }` |
 
 Any other plugin can subscribe to these channels via `ctx.streams.on`.
 
@@ -335,7 +336,7 @@ interface DeliverableReview {
 `quality_gate.trends` returns per-agent quality statistics:
 
 ```ts
-interface AgentTrend {
+export interface AgentTrend {
   agentId:            string;
   displayName:        string;
   avgQualityScore:    number;
@@ -346,10 +347,11 @@ interface AgentTrend {
   approvalRate:       number;      // percentage
   autoRejectRate:     number;     // percentage
   totalReviews:       number;
+  /** Most recent quality scores (newest first, capped at 10). */
   recentScores?:      { score: number; status: ReviewStatus; createdAt: string }[];
 }
 
-interface QualityTrendsData {
+export interface QualityTrendsData {
   agents:           AgentTrend[];
   overallAvgScore:  number;
   totalReviews:     number;

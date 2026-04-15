@@ -20,10 +20,14 @@ function evaluateQuality(score, blockApproval, config) {
 
   if (score === undefined || score === null) {
     category = "none";
+  } else if (blockApproval) {
+    // blockApproval takes explicit precedence — force human review regardless of score.
+    category = "needs_human_review";
+    blockThresholdBreached = true;
   } else if (score < config.autoRejectBelow) {
     category = "auto_rejected";
     autoRejected = true;
-  } else if (blockApproval || score <= config.blockThreshold) {
+  } else if (score <= config.blockThreshold) {
     category = "needs_human_review";
     blockThresholdBreached = true;
   } else if (score >= config.minQualityScore) {
@@ -111,6 +115,14 @@ describe("evaluateQuality", () => {
   it("block_approval=true → needs_human_review regardless of score", () => {
     const r = evaluateQuality(9, true, DEFAULT_CONFIG);
     assert.strictEqual(r.category, "needs_human_review");
+    assert.strictEqual(r.blockThresholdBreached, true);
+  });
+
+  it("block_approval=true with score=0 → needs_human_review (not auto_rejected)", () => {
+    // blockApproval takes precedence over autoRejectBelow (the bug this fixes)
+    const r = evaluateQuality(0, true, DEFAULT_CONFIG);
+    assert.strictEqual(r.category, "needs_human_review");
+    assert.strictEqual(r.autoRejected, false);
     assert.strictEqual(r.blockThresholdBreached, true);
   });
 
