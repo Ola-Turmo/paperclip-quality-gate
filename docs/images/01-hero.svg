@@ -1,1 +1,169 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><rect x="0" y="0" width="1200" height="630" rx="0" fill="#0d1b2a"/><rect x="0" y="0" width="1200" height="6" rx="0" fill="#00e5ff"/><text x="600" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="38" font-weight="bold" fill="#00e5ff">uos-quality-gate</text><text x="600" y="100" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#90a4ae">Universal Quality Gate for Paperclip</text><line x1="60" y1="130" x2="1140" y2="130" stroke="#1e3a5f" stroke-width="1"/><rect x="60" y="155" width="252" height="300" rx="16" fill="#00e5ff"/><text x="186" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white"><tspan x="186" dy="-32">AGENT</tspan><tspan x="186" dy="32">INTERCEPTION</tspan></text><text x="186" y="385" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="normal" fill="rgba(255,255,255,0.75)"><tspan x="186" dy="-20">Auto-captures every</tspan><tspan x="186" dy="20">agent.run.finished event</tspan><tspan x="186" dy="20">across all UOS agents</tspan></text><rect x="336" y="155" width="252" height="300" rx="16" fill="#00bcd4"/><text x="462" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white"><tspan x="462" dy="-32">SMART</tspan><tspan x="462" dy="32">EVALUATION</tspan></text><text x="462" y="385" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="normal" fill="rgba(255,255,255,0.75)"><tspan x="462" dy="-20">8 deterministic checks,</tspan><tspan x="462" dy="20">djb2 variance, calibrated</tspan><tspan x="462" dy="20">threshold scoring</tspan></text><rect x="612" y="155" width="252" height="300" rx="16" fill="#0097a7"/><text x="738" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white"><tspan x="738" dy="-32">HUMAN</tspan><tspan x="738" dy="32">GATE</tspan></text><text x="738" y="385" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="normal" fill="rgba(255,255,255,0.75)"><tspan x="738" dy="-20">No deliverable passes</tspan><tspan x="738" dy="20">without human approval</tspan><tspan x="738" dy="20">below score 7</tspan></text><rect x="888" y="155" width="252" height="300" rx="16" fill="#006064"/><text x="1014" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white"><tspan x="1014" dy="-32">PLUGIN</tspan><tspan x="1014" dy="32">PROTOCOL</tspan></text><text x="1014" y="385" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="normal" fill="rgba(255,255,255,0.75)"><tspan x="1014" dy="-20">quality_gate.* actions,</tspan><tspan x="1014" dy="20">data, events, streams —</tspan><tspan x="1014" dy="20">open integration API</tspan></text><rect x="0" y="485" width="1200" height="145" rx="0" fill="#071323"/><text x="600" y="510" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#546e7a">Built on the Paperclip Plugin SDK  ·  v1.0.0  ·  MIT License</text><text x="120" y="555" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#00e5ff">20/20</text><text x="120" y="583" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#78909c">Smoke Tests</text><text x="320" y="555" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#00e5ff">4</text><text x="320" y="583" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#78909c">Agent Tools</text><text x="520" y="555" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#00e5ff">3</text><text x="520" y="583" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#78909c">Plugin Actions</text><text x="720" y="555" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#00e5ff">5</text><text x="720" y="583" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#78909c">Stream Channels</text><text x="920" y="555" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#00e5ff">8</text><text x="920" y="583" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#78909c">Quality Checks</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0f1e"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="shieldgrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="bluegrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Subtle grid lines -->
+  <g stroke="#1e293b" stroke-width="1" opacity="0.6">
+    <line x1="0" y1="157" x2="1200" y2="157"/>
+    <line x1="0" y1="314" x2="1200" y2="314"/>
+    <line x1="0" y1="471" x2="1200" y2="471"/>
+    <line x1="300" y1="0" x2="300" y2="630"/>
+    <line x1="600" y1="0" x2="600" y2="630"/>
+    <line x1="900" y1="0" x2="900" y2="630"/>
+  </g>
+
+  <!-- Left panel: Title block -->
+  <text x="60" y="95" font-family="Arial,sans-serif" font-size="13"
+        font-weight="bold" fill="#3b82f6" letter-spacing="3">PAPERCLIP PLUGIN</text>
+
+  <text x="60" y="140" font-family="Arial,sans-serif" font-size="52"
+        font-weight="bold" fill="white">uos-quality-gate</text>
+
+  <text x="60" y="175" font-family="Arial,sans-serif" font-size="20"
+        fill="#94a3b8">Universal Quality Gate for the UOS ecosystem</text>
+
+  <text x="60" y="210" font-family="Arial,sans-serif" font-size="15"
+        fill="#64748b">Auto-intercepts every agent completion.</text>
+  <text x="60" y="232" font-family="Arial,sans-serif" font-size="15"
+        fill="#64748b">Scores quality. Enforces human approval</text>
+  <text x="60" y="254" font-family="Arial,sans-serif" font-size="15"
+        fill="#64748b">before work is marked done.</text>
+
+  <!-- Score badges (left side) -->
+  <!-- Green badge: pass zone -->
+  <rect x="60" y="280" width="180" height="72" rx="10" fill="#22c55e" opacity="0.15"/>
+  <rect x="60" y="280" width="180" height="72" rx="10" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="150" y="308" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="28" font-weight="bold" fill="#22c55e">7+</text>
+  <text x="150" y="326" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#86efac">AUTO-PASS</text>
+  <text x="150" y="342" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#6b7280">score threshold</text>
+
+  <!-- Orange badge: human review zone -->
+  <rect x="260" y="280" width="180" height="72" rx="10" fill="#f59e0b" opacity="0.15"/>
+  <rect x="260" y="280" width="180" height="72" rx="10" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="350" y="308" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="28" font-weight="bold" fill="#f59e0b">3-6</text>
+  <text x="350" y="326" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#fcd34d">HUMAN REVIEW</text>
+  <text x="350" y="342" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#6b7280">block threshold</text>
+
+  <!-- Red badge: auto-reject zone -->
+  <rect x="460" y="280" width="180" height="72" rx="10" fill="#ef4444" opacity="0.15"/>
+  <rect x="460" y="280" width="180" height="72" rx="10" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="550" y="308" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="28" font-weight="bold" fill="#ef4444">&lt;3</text>
+  <text x="550" y="326" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#fca5a5">AUTO-REJECT</text>
+  <text x="550" y="342" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#6b7280">sent back to agent</text>
+
+  <!-- Right panel: Metric cards -->
+  <!-- Big shield icon (SVG path) -->
+  <path d="M960,100 L1020,120 L1020,180 C1020,220 1000,255 960,275 C920,255 900,220 900,180 L900,120 Z"
+        fill="url(#shieldgrad)" opacity="0.9"/>
+  <path d="M960,140 L960,220 M930,170 L960,145 L990,170"
+        stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Feature label above shield -->
+  <text x="960" y="310" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="12" fill="#22c55e" font-weight="bold">AGENT RUN FINISHED</text>
+  <text x="960" y="326" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#64748b">auto-triggers evaluation</text>
+
+  <!-- Metrics row (right side) -->
+  <!-- Card 1 -->
+  <rect x="730" y="360" width="100" height="90" rx="8" fill="#1e293b"/>
+  <text x="780" y="400" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="26" font-weight="bold" fill="#22c55e">91</text>
+  <text x="780" y="418" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#94a3b8">Tests</text>
+  <text x="780" y="434" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#475569">all passing</text>
+
+  <!-- Card 2 -->
+  <rect x="845" y="360" width="100" height="90" rx="8" fill="#1e293b"/>
+  <text x="895" y="400" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="26" font-weight="bold" fill="#3b82f6">6</text>
+  <text x="895" y="418" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#94a3b8">Actions</text>
+  <text x="895" y="434" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#475569">submit/approve/reject</text>
+
+  <!-- Card 3 -->
+  <rect x="960" y="360" width="100" height="90" rx="8" fill="#1e293b"/>
+  <text x="1010" y="400" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="26" font-weight="bold" fill="#f59e0b">2</text>
+  <text x="1010" y="418" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#94a3b8">Agent Tools</text>
+  <text x="1010" y="434" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#475569">for paperclip agents</text>
+
+  <!-- Card 4 -->
+  <rect x="1075" y="360" width="100" height="90" rx="8" fill="#1e293b"/>
+  <text x="1125" y="400" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="26" font-weight="bold" fill="#a78bfa">6</text>
+  <text x="1125" y="418" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="11" fill="#94a3b8">Streams</text>
+  <text x="1125" y="434" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="10" fill="#475569">real-time events</text>
+
+  <!-- 4th row: More features -->
+  <!-- Feature: Auto Intercept -->
+  <rect x="60" y="375" width="280" height="56" rx="8" fill="#1e293b"/>
+  <rect x="60" y="375" width="4" height="56" rx="2" fill="#3b82f6"/>
+  <text x="80" y="397" font-family="Arial,sans-serif" font-size="12"
+        font-weight="bold" fill="white">AGENT INTERCEPTION</text>
+  <text x="80" y="416" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">
+    Auto-captures agent.run.finished across all UOS agents
+  </text>
+
+  <!-- Feature: Smart Evaluation -->
+  <rect x="360" y="375" width="280" height="56" rx="8" fill="#1e293b"/>
+  <rect x="360" y="375" width="4" height="56" rx="2" fill="#22c55e"/>
+  <text x="380" y="397" font-family="Arial,sans-serif" font-size="12"
+        font-weight="bold" fill="white">SMART EVALUATION</text>
+  <text x="380" y="416" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">
+    3 built-in checks + custom rules. djb2 variance. deterministic.
+  </text>
+
+  <!-- Feature: Human Gate -->
+  <rect x="660" y="375" width="280" height="56" rx="8" fill="#1e293b"/>
+  <rect x="660" y="375" width="4" height="56" rx="2" fill="#f59e0b"/>
+  <text x="680" y="397" font-family="Arial,sans-serif" font-size="12"
+        font-weight="bold" fill="white">HUMAN GATE</text>
+  <text x="680" y="416" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">
+    No deliverable passes below score 7 without human approval
+  </text>
+
+  <!-- Bottom: Plugin Protocol -->
+  <rect x="60" y="445" width="880" height="56" rx="8" fill="#1e293b"/>
+  <rect x="60" y="445" width="4" height="56" rx="2" fill="#a78bfa"/>
+  <text x="80" y="467" font-family="Arial,sans-serif" font-size="12"
+        font-weight="bold" fill="white">PLUGIN PROTOCOL</text>
+  <text x="80" y="486" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">
+    quality_gate.* actions, data, events, streams. Zero coupling. Any plugin can consume.
+  </text>
+
+  <!-- Bottom right: License badge -->
+  <rect x="730" y="460" width="200" height="40" rx="20" fill="#1e293b"/>
+  <text x="830" y="485" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="12" fill="#64748b">Built on Paperclip Plugin SDK</text>
+</svg>
