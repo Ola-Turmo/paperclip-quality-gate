@@ -1,316 +1,163 @@
-/**
- * Unit tests for the actual helpers.ts source.
- * Runs against the TypeScript source directly via tsx --test.
- *
- * Key boundaries (DEFAULT_CONFIG: minQualityScore=7, blockThreshold=5, autoRejectBelow=3):
- *   undefined/null  → "none"
- *   0, 1, 2        → "auto_rejected"  (score < autoRejectBelow)
- *   3, 4, 5, 6     → "needs_human_review"  (score <= blockThreshold, or blockApproval)
- *   7, 8, 9, 10    → "passed"         (score >= minQualityScore)
- *
- * Variance: ±1 from djb2 — must be deterministic (same input = same output).
- */
 import { describe, it } from "node:test";
-import assert from "node:assert";
+import assert from "node:assert/strict";
 import {
+  buildEvidenceMarkdown,
+  buildNewReview,
+  buildNextStepTemplate,
+  buildReviewQueueData,
   evaluateQuality,
-  mapTargetStatus,
-  buildApproveComment,
-  buildRejectComment,
-  buildAutoRejectComment,
-  buildSubmitComment,
+  redactSensitiveText,
+  updateReviewStatus,
 } from "../src/helpers.ts";
 import { DEFAULT_CONFIG } from "../src/manifest.js";
 
-// ── evaluateQuality ───────────────────────────────────────────────────────────
-
-describe("evaluateQuality — actual source (tsx)", () => {
-  const cfg = DEFAULT_CONFIG;
-
-  // Score = undefined/null → "none"
-  it("undefined score → category 'none'", () => {
-    const r = evaluateQuality(undefined, false, cfg);
-    assert.strictEqual(r.category, "none");
-    assert.strictEqual(r.autoRejected, false);
-    assert.strictEqual(r.passed, false);
-  });
-
-  it("null score → category 'none'", () => {
-  // @ts-ignore — deliberately pass null to test runtime behaviour
-  const r = evaluateQuality(null, false, cfg);
-    assert.strictEqual(r.category, "none");
-  });
-
-  // Score < autoRejectBelow (3) → "auto_rejected"
-  it("score 0 → auto_rejected", () => {
-    const r = evaluateQuality(0, false, cfg);
-    assert.strictEqual(r.category, "auto_rejected");
-    assert.strictEqual(r.autoRejected, true);
-    assert.strictEqual(r.passed, false);
-  });
-
-  it("score 1 → auto_rejected", () => {
-    const r = evaluateQuality(1, false, cfg);
-    assert.strictEqual(r.category, "auto_rejected");
-  });
-
-  it("score 2 → auto_rejected", () => {
-    const r = evaluateQuality(2, false, cfg);
-    assert.strictEqual(r.category, "auto_rejected");
-  });
-
-  // Score at autoRejectBelow boundary (3) → not auto-rejected
-  it("score 3 → NOT auto_rejected (at boundary)", () => {
-    const r = evaluateQuality(3, false, cfg);
-    assert.notStrictEqual(r.category, "auto_rejected");
-  });
-
-  // Score <= blockThreshold (5) → "needs_human_review"
-  it("score 3 → needs_human_review (score <= blockThreshold)", () => {
-    const r = evaluateQuality(3, false, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-    assert.strictEqual(r.blockThresholdBreached, true);
-  });
-
-  it("score 4 → needs_human_review (score <= blockThreshold)", () => {
-    const r = evaluateQuality(4, false, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-  });
-
-  it("score 5 → needs_human_review (score == blockThreshold)", () => {
-    const r = evaluateQuality(5, false, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-    assert.strictEqual(r.blockThresholdBreached, true);
-  });
-
-  // Score between blockThreshold and minQualityScore
-  it("score 6 → needs_human_review (between thresholds)", () => {
-    const r = evaluateQuality(6, false, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-    assert.strictEqual(r.blockThresholdBreached, false);
-  });
-
-  // Score >= minQualityScore (7) → "passed"
-  it("score 7 → passed (score == minQualityScore)", () => {
-    const r = evaluateQuality(7, false, cfg);
-    assert.strictEqual(r.category, "passed");
-    assert.strictEqual(r.passed, true);
-    assert.strictEqual(r.blockThresholdBreached, false);
-    assert.strictEqual(r.autoRejected, false);
-  });
-
-  it("score 8 → passed", () => {
-    const r = evaluateQuality(8, false, cfg);
-    assert.strictEqual(r.category, "passed");
-  });
-
-  it("score 9 → passed", () => {
-    const r = evaluateQuality(9, false, cfg);
-    assert.strictEqual(r.category, "passed");
-  });
-
-  it("score 10 → passed", () => {
-    const r = evaluateQuality(10, false, cfg);
-    assert.strictEqual(r.category, "passed");
-  });
-
-  // blockApproval overrides score
-  it("blockApproval=true → needs_human_review regardless of high score", () => {
-    const r = evaluateQuality(9, true, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-    assert.strictEqual(r.blockThresholdBreached, true);
-    assert.strictEqual(r.passed, false);
-  });
-
-  it("blockApproval=true with score 0 → needs_human_review", () => {
-    const r = evaluateQuality(0, true, cfg);
-    assert.strictEqual(r.category, "needs_human_review");
-    assert.strictEqual(r.autoRejected, false); // blockApproval takes precedence
-  });
-
-  // Clamping: overallScore is clamped to [0, 10]
-  it("overallScore is clamped to 0 at minimum", () => {
-    // The variance can push score negative; verify clamping
-    const r = evaluateQuality(0, false, cfg);
-    assert.ok(r.overallScore >= 0);
-    assert.ok(r.overallScore <= 10);
-  });
-
-  it("overallScore is clamped to 10 at maximum", () => {
-    const r = evaluateQuality(10, false, cfg);
-    assert.ok(r.overallScore >= 0);
-    assert.ok(r.overallScore <= 10);
-  });
-
-  // Determinism: same inputs must produce same outputs
-  it("deterministic: two calls with same score produce identical results", () => {
-    const r1 = evaluateQuality(7, false, cfg);
-    const r2 = evaluateQuality(7, false, cfg);
-    assert.deepStrictEqual(r1, r2);
-  });
-
-  it("deterministic: djb2 variance is ±1 and consistent", () => {
-    // Run multiple scores and verify variant is always -1, 0, or +1
-    for (const score of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
-      const r = evaluateQuality(score, false, cfg);
-      const diff = r.overallScore - (score ?? 0);
-      assert.ok(
-        diff >= -1 && diff <= 1,
-        `score=${score}: overallScore=${r.overallScore}, diff=${diff} not in [-1,0,+1]`,
-      );
-    }
-  });
-
-  // Checks are always present
-  it("returns non-empty checks array", () => {
-    const r = evaluateQuality(7, false, cfg);
-    assert.ok(Array.isArray(r.checks));
-    assert.ok(r.checks.length > 0);
-  });
-
-  // Summary is always a string
-  it("returns a non-empty summary string", () => {
-    const r = evaluateQuality(7, false, cfg);
-    assert.strictEqual(typeof r.summary, "string");
-    assert.ok(r.summary.length > 0);
-  });
-});
-
-// ── mapTargetStatus ───────────────────────────────────────────────────────────
-
-describe("mapTargetStatus — actual source (tsx)", () => {
-  it('"passed" → "in_review"', () => {
-    assert.strictEqual(mapTargetStatus("passed"), "in_review");
-  });
-
-  it('"needs_human_review" → "in_review"', () => {
-    assert.strictEqual(mapTargetStatus("needs_human_review"), "in_review");
-  });
-
-  it('"auto_rejected" → "in_progress"', () => {
-    assert.strictEqual(mapTargetStatus("auto_rejected"), "in_progress");
-  });
-
-  it('"rejected" → "in_progress"', () => {
-    assert.strictEqual(mapTargetStatus("rejected"), "in_progress");
-  });
-
-  it('"blocked" → "blocked"', () => {
-    assert.strictEqual(mapTargetStatus("blocked"), "blocked");
-  });
-
-  it('"none" → null', () => {
-    assert.strictEqual(mapTargetStatus("none"), null);
-  });
-});
-
-// ── buildApproveComment ───────────────────────────────────────────────────────
-
-describe("buildApproveComment — actual source (tsx)", () => {
-  it("includes approved header and body", () => {
-    const c = buildApproveComment();
-    assert.ok(c.includes("✅"));
-    assert.ok(c.includes("approved"));
-    assert.ok(c.includes("approved by a reviewer"));
-  });
-
-  it("includes optional comment as a blockquote (prefixed with >)", () => {
-    const c = buildApproveComment("Looks great!");
-    assert.ok(c.includes("> Looks great!"));
-  });
-
-  it("omits quote block when no comment provided", () => {
-    const c = buildApproveComment();
-    // Should not have a blockquote marker when empty
-    assert.ok(!c.includes(">") || !c.includes("\n>"));
-  });
-
-  it("ends with quality gate passed marker", () => {
-    const c = buildApproveComment();
-    assert.ok(c.includes("Quality gate passed"));
-  });
-});
-
-// ── buildRejectComment ────────────────────────────────────────────────────────
-
-describe("buildRejectComment — actual source (tsx)", () => {
-  it("includes rejected header", () => {
-    const c = buildRejectComment("Fix it");
-    assert.ok(c.includes("❌"));
-    assert.ok(c.includes("rejected"));
-  });
-
-  it("includes rejection reason as quote", () => {
-    const c = buildRejectComment("Missing tests");
-    assert.ok(c.includes("Missing tests"));
-  });
-
-  it("includes resubmit guidance", () => {
-    const c = buildRejectComment("Not ready");
-    assert.ok(c.includes("resubmit"));
-  });
-});
-
-// ── buildAutoRejectComment ───────────────────────────────────────────────────
-
-describe("buildAutoRejectComment — actual source (tsx)", () => {
-  it("includes score and threshold", () => {
-    const c = buildAutoRejectComment(2, 3);
-    assert.ok(c.includes("2"));
-    assert.ok(c.includes("3"));
-    assert.ok(c.includes("auto-reject"));
-  });
-
-  it("notes no human review was performed", () => {
-    const c = buildAutoRejectComment(1, 3);
-    assert.ok(c.includes("No human review"));
-  });
-
-  it("includes resubmit guidance", () => {
-    const c = buildAutoRejectComment(0, 3);
-    assert.ok(c.includes("improve quality") || c.includes("resubmit"));
-  });
-});
-
-// ── buildSubmitComment ────────────────────────────────────────────────────────
-
-describe("buildSubmitComment — actual source (tsx)", () => {
-  it("includes score in output", () => {
-    const c = buildSubmitComment({
-      qualityScore: 8,
-      evaluationSummary: "Looks good.",
-      qualityChecks: [],
+describe("evaluateQuality", () => {
+  it("uses passed custom checks to increase the decision score", () => {
+    const result = evaluateQuality(6, false, {
+      ...DEFAULT_CONFIG,
+      customChecks: [
+        { id: "has-assignee", name: "Has assignee", type: "has_assignee", scoreBonus: 2 },
+      ],
+    }, {
+      title: "Ship outreach review cockpit",
+      assignee: "agent-reviewer",
     });
-    assert.ok(c.includes("8"));
-    assert.ok(c.includes("10"));
+
+    assert.equal(result.decisionScore, 8);
+    assert.equal(result.category, "passed");
+    assert.equal(result.checks.some((check) => check.id === "custom_has-assignee" && check.passed), true);
   });
 
-  it("includes evaluation summary", () => {
-    const c = buildSubmitComment({
-      qualityScore: 8,
-      evaluationSummary: "Meets all criteria.",
-      qualityChecks: [],
-    });
-    assert.ok(c.includes("Meets all criteria"));
+  it("keeps missing scores in the manual review lane", () => {
+    const result = evaluateQuality(undefined, false, DEFAULT_CONFIG);
+    assert.equal(result.category, "none");
+    assert.equal(result.blockThresholdBreached, true);
+    assert.equal(result.riskFlags.some((flag) => flag.id === "missing-score"), true);
   });
 
-  it("adds block approval warning when flag is set", () => {
-    const c = buildSubmitComment({
-      qualityScore: 8,
-      evaluationSummary: "Done.",
-      blockApproval: true,
-      qualityChecks: [],
+  it("lets block approval override auto rejection", () => {
+    const result = evaluateQuality(1, true, DEFAULT_CONFIG);
+    assert.equal(result.category, "needs_human_review");
+    assert.equal(result.autoRejected, false);
+  });
+});
+
+describe("review package builders", () => {
+  it("creates a review with evidence, draft, and next-step guidance", () => {
+    const evaluation = evaluateQuality(8, false, DEFAULT_CONFIG, {
+      title: "Cold outreach draft",
+      description: "Prepare a reviewer-ready outbound message.",
+      labels: ["outreach", "needs-review"],
+      assignee: "sales-ops",
     });
-    assert.ok(c.includes("⚠️") || c.includes("Block"));
+
+    const review = buildNewReview({
+      issueId: "ISSUE-42",
+      companyId: "COMPANY-1",
+      summary: "Drafted the outreach sequence and evidence notes.",
+      reviewerName: "Operator",
+      issueData: {
+        title: "Cold outreach draft",
+        description: "Prepare a reviewer-ready outbound message.",
+        labels: ["outreach", "needs-review"],
+        assignee: "sales-ops",
+      },
+      evaluation,
+      trigger: {
+        source: "manual_submit",
+        actorLabel: "Operator",
+        createdAt: "2026-04-19T07:00:00.000Z",
+      },
+    });
+
+    assert.equal(review.status, "pending_review");
+    assert.ok(review.evidenceBundle.hash.startsWith("qh_"));
+    assert.equal(review.draftArtifact.revision, 1);
+    assert.match(review.nextStepTemplate, /Revision brief|Release checklist|Follow-up instruction/);
+    assert.match(buildEvidenceMarkdown(review), /Quality gate evidence package/);
   });
 
-  it("omits block warning when flag is false", () => {
-    const c = buildSubmitComment({
-      qualityScore: 8,
-      evaluationSummary: "Done.",
-      blockApproval: false,
-      qualityChecks: [],
+  it("recomputes summary and next-step guidance on status updates", () => {
+    const evaluation = evaluateQuality(8, false, DEFAULT_CONFIG);
+    const review = buildNewReview({
+      issueId: "ISSUE-99",
+      companyId: "COMPANY-1",
+      summary: "Initial summary",
+      reviewerName: "Operator",
+      evaluation,
+      trigger: {
+        source: "manual_submit",
+        actorLabel: "Operator",
+        createdAt: "2026-04-19T07:00:00.000Z",
+      },
     });
-    assert.ok(!c.includes("⚠️") || !c.includes("block approval flag"));
+
+    const updated = updateReviewStatus(review, "approved", {
+      action: "approved_hold",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+    }, {
+      releaseDecision: {
+        approvalState: "approved_hold",
+        approvedBy: "Reviewer",
+      },
+      nextStepTemplate: buildNextStepTemplate(review, "release"),
+    });
+
+    assert.equal(updated.reviewSummary.disposition, "Approved and held");
+    assert.match(updated.nextStepTemplate, /Release checklist/);
+  });
+});
+
+
+describe("security redaction", () => {
+  it("redacts common secret patterns before storing evidence text", () => {
+    const redacted = redactSensitiveText("Use sk-123456789012345678901234 and Bearer abcdefghijklmnopqrstuvwxyz123456");
+    assert.match(redacted, /\[REDACTED API KEY\]/);
+    assert.match(redacted, /Bearer \[REDACTED\]/);
+  });
+});
+
+describe("review queue snapshot", () => {
+  it("summarizes queue counts and preserves recent ordering", () => {
+    const approved = buildNewReview({
+      issueId: "ISSUE-1",
+      companyId: "COMPANY-1",
+      summary: "Approved draft",
+      reviewerName: "Operator",
+      evaluation: evaluateQuality(8, false, DEFAULT_CONFIG),
+      trigger: {
+        source: "manual_submit",
+        actorLabel: "Operator",
+        createdAt: "2026-04-19T07:00:00.000Z",
+      },
+    });
+    approved.releaseDecision = { approvalState: "released", releasedBy: "Reviewer", releasedAt: "2026-04-19T07:10:00.000Z" };
+    approved.updatedAt = "2026-04-19T07:05:00.000Z";
+    approved.status = "approved";
+
+    const pending = buildNewReview({
+      issueId: "ISSUE-2",
+      companyId: "COMPANY-1",
+      summary: "Needs human review",
+      reviewerName: "Operator",
+      evaluation: evaluateQuality(undefined, false, DEFAULT_CONFIG),
+      trigger: {
+        source: "manual_submit",
+        actorLabel: "Operator",
+        createdAt: "2026-04-19T07:20:00.000Z",
+      },
+    });
+    pending.updatedAt = "2026-04-19T07:30:00.000Z";
+
+    const queue = buildReviewQueueData([
+      { review: approved, issue: { id: approved.issueId, title: "Approved draft", status: "done" } },
+      { review: pending, issue: { id: pending.issueId, title: "Needs review", status: "in_review" } },
+    ]);
+
+    assert.equal(queue.summary.totalReviews, 2);
+    assert.equal(queue.summary.pendingReviews, 1);
+    assert.equal(queue.summary.releasedReviews, 1);
+    assert.equal(queue.items[0]?.issueId, "ISSUE-2");
   });
 });

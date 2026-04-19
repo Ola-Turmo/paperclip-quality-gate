@@ -1,227 +1,149 @@
-/**
- * Event subscriptions for uos-quality-gate.
- * Each handler is registered in ctx.events by setupEvents().
- */
-import type { PluginContext, PluginEvent, Issue } from "@paperclipai/plugin-sdk";
-import type {
-  AgentRunFinishedEvent,
-  DeliverableReview,
-  IssueCreatedEvent,
-  IssueUpdatedEvent,
-  ReviewStatus,
-} from "./types.js";
+import type { Issue, PluginContext, PluginEvent } from "@paperclipai/plugin-sdk";
+import type { AgentRunFinishedEvent, IssueCreatedEvent, IssueUpdatedEvent } from "./types.js";
 import {
+  applyEvaluationToReview,
+  buildAutoRejectComment,
   buildNewReview,
   buildSubmitComment,
+  buildTelemetryEnvelope,
   evaluateQuality,
   mapTargetStatus,
-  updateReviewStatus,
 } from "./helpers.js";
-import { getConfig, getReview, putReview } from "./shared.js";
+import { emitObservability, getConfig, getIssueSnapshot, getReview, persistReviewArtifacts, putReview } from "./shared.js";
 
-/**
- * agent.run.finished — auto-evaluate after agent run completes.
- * Runs quality evaluation and creates/updates review automatically.
- * Does NOT auto-reject or auto-approve — always sets in_review or needs_human_review.
- */
+async function postIssueComment(ctx: PluginContext, issueId: string, companyId: string, body: string): Promise<void> {
+  try {
+    await ctx.issues.createComment(issueId, body, companyId);
+  } catch (error) {
+    ctx.logger.warn("quality_gate.events: failed to post comment", { issueId, error: String(error) });
+  }
+}
+
 async function handleAgentRunFinished(event: PluginEvent, ctx: PluginContext): Promise<void> {
   const runId = event.entityId ?? "";
   const companyId = event.companyId ?? "";
-  const payload = event.payload as unknown as AgentRunFinishedEvent;
-  const { agentId, status, summary, qualityScore, blockApproval } = payload;
+  const payload = event.payload as AgentRunFinishedEvent;
 
-  if (!runId || !companyId) {
-    ctx.logger.info("agent.run.finished: missing runId or companyId, skipping", { runId, companyId });
+  if (!runId || !companyId || payload.status === "failed") {
     return;
   }
 
-  if (status === "failed") {
-    ctx.logger.info("agent.run.finished: run failed, skipping auto-gate", { runId, status });
-    return;
-  }
-
-  // Find the issue this run was for
   let issueId = "";
   try {
     const issues = await ctx.issues.list({ companyId, limit: 50 });
-    const matched = issues.find(
-      (issue) =>
-        (issue as { executionRunId?: string; checkoutRunId?: string }).executionRunId === runId ||
-        (issue as { executionRunId?: string; checkoutRunId?: string }).checkoutRunId === runId,
-    );
+    const matched = issues.find((issue) => {
+      const record = issue as unknown as { executionRunId?: string; checkoutRunId?: string };
+      return record.executionRunId === runId || record.checkoutRunId === runId;
+    });
     issueId = matched?.id ?? "";
-  } catch (err) {
-    ctx.logger.warn("agent.run.finished: failed to list issues", { error: String(err) });
+  } catch (error) {
+    ctx.logger.warn("agent.run.finished: failed to list issues", { error: String(error) });
   }
 
-  if (!issueId) {
-    ctx.logger.info("agent.run.finished: no issue found for this runId, skipping", { runId });
-    return;
-  }
-
-  const cfg = await getConfig(ctx);
-
-  // Extract issue metadata for custom checks evaluation
-  let issueData: { labels?: string[]; title?: string; assignee?: string } | undefined;
-  if (issueId) {
-    try {
-      const issue = await ctx.issues.get(issueId, companyId);
-      if (issue) {
-        issueData = {
-          labels: (issue as unknown as { labels?: string[] }).labels,
-          title: issue.title,
-          assignee: (issue as unknown as { assignee?: string }).assignee,
-        };
-      }
-    } catch {
-      // issue may have been deleted — custom checks silently skipped
-    }
-  }
-
-  const evaluation = evaluateQuality(qualityScore, blockApproval ?? false, cfg, issueData);
-
-  // Determine new review status from evaluation (not the old status)
-  let reviewStatus: ReviewStatus = "pending_review";
-  if (evaluation.autoRejected) {
-    reviewStatus = "auto_rejected";
-  } else if (evaluation.blockThresholdBreached) {
-    reviewStatus = "needs_human_review";
-  }
-
-  // Check if review already exists
-  let review = await getReview(ctx, issueId);
-  const isNew = review === null;
-
-  if (isNew) {
-    review = buildNewReview({
-      issueId,
-      companyId,
-      summary,
-      qualityScore: evaluation.overallScore,
-      blockApproval: blockApproval ?? false,
-      reviewerName: "Agent",
-      agentId,
-      qualityChecks: evaluation.checks,
-      evaluationSummary: evaluation.summary,
-      category: evaluation.category,
-    });
-  } else {
-    review = updateReviewStatus(review!, reviewStatus, {
-      action: `auto-evaluated after agent.run.finished (resumed)`,
-      reviewer: "agent",
-      reviewerName: "System",
-      comment: evaluation.summary,
-      qualityScore: evaluation.overallScore,
-      auto: true,
-    });
-  }
-
-  await putReview(ctx, review);
-
-  const targetStatus = mapTargetStatus(evaluation.category);
+  if (!issueId) return;
 
   try {
-    if (targetStatus) {
-      await ctx.issues.update(
-        issueId,
-        { status: targetStatus as Issue["status"] },
-        companyId,
-      );
-    }
-  } catch (err) {
-    ctx.logger.warn("agent.run.finished: failed to update issue status", { error: String(err) });
-  }
+    const config = await getConfig(ctx);
+    const { issueData } = await getIssueSnapshot(ctx, issueId, companyId);
+    const evaluation = evaluateQuality(payload.qualityScore, payload.blockApproval ?? false, config, issueData);
+    const existingReview = await getReview(ctx, issueId);
 
-  try {
-    await ctx.issues.createComment(
+    const review = existingReview
+      ? applyEvaluationToReview(existingReview, {
+          summary: payload.summary,
+          evaluation,
+          reviewerName: "Agent",
+          agentId: payload.agentId,
+          issueData,
+          blockApproval: payload.blockApproval,
+          trigger: {
+            source: "agent_run_finished",
+            actorLabel: payload.agentId || "Agent",
+            agentId: payload.agentId,
+            runId,
+            summary: payload.summary,
+            createdAt: new Date().toISOString(),
+          },
+        })
+      : buildNewReview({
+          issueId,
+          companyId,
+          summary: payload.summary,
+          qualityScore: payload.qualityScore,
+          blockApproval: payload.blockApproval,
+          reviewerName: "Agent",
+          agentId: payload.agentId,
+          issueData,
+          evaluation,
+          trigger: {
+            source: "agent_run_finished",
+            actorLabel: payload.agentId || "Agent",
+            agentId: payload.agentId,
+            runId,
+            summary: payload.summary,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+    await putReview(ctx, review);
+    await persistReviewArtifacts(ctx, review);
+    await postIssueComment(
+      ctx,
       issueId,
-      buildSubmitComment({
-        qualityScore: evaluation.overallScore,
-        evaluationSummary: evaluation.summary,
-        blockApproval: blockApproval ?? false,
-        qualityChecks: evaluation.checks,
-      }),
       companyId,
+      evaluation.autoRejected ? buildAutoRejectComment(review.decisionScore, config.autoRejectBelow) : buildSubmitComment(review),
     );
-  } catch (err) {
-    ctx.logger.warn("agent.run.finished: failed to post comment", { error: String(err) });
-  }
 
-  try {
-    await ctx.activity.log({
-      companyId,
-      message: `Quality gate auto-evaluated after run ${runId} (agent ${agentId})`,
-      entityType: "issue",
-      entityId: issueId,
-    });
-  } catch {
-    // activity not available
-  }
+    const targetStatus = mapTargetStatus(review.category) as Issue["status"] | null;
+    if (targetStatus) {
+      try {
+        await ctx.issues.update(issueId, { status: targetStatus }, companyId);
+      } catch (error) {
+        ctx.logger.warn("agent.run.finished: failed to update issue status", { issueId, error: String(error) });
+      }
+    }
 
-  try {
-    await ctx.metrics.write("quality_gate.reviews.auto_evaluated", 1, { companyId });
-  } catch {
-    // metrics not available
-  }
+    await emitObservability(ctx, "auto_evaluated", review, buildTelemetryEnvelope(review, "auto_evaluated"));
+    if (!existingReview) ctx.streams.emit("quality_gate.review_created", { review });
+    ctx.streams.emit("quality_gate.review_updated", { review });
 
-  if (isNew) {
-    ctx.streams.emit("quality_gate.review_created", { review });
+    if (evaluation.autoRejected) {
+      ctx.streams.emit("quality_gate.threshold_breached", { review, score: review.decisionScore, reason: "auto_rejected" });
+    } else if (evaluation.blockThresholdBreached || evaluation.category === "none") {
+      ctx.streams.emit("quality_gate.threshold_breached", { review, score: review.decisionScore, reason: "block_threshold" });
+    }
+  } catch (error) {
+    ctx.logger.warn("agent.run.finished: quality gate failed", { issueId, error: String(error) });
   }
-  ctx.streams.emit("quality_gate.review_updated", { review });
-
-  ctx.logger.info("agent.run.finished: auto-gate complete", {
-    issueId,
-    runId,
-    score: evaluation.overallScore,
-    category: evaluation.category,
-    status: review.status,
-  });
 }
 
-/**
- * agent.run.failed — log failed runs; skip auto-gate since no deliverable was produced.
- */
 async function handleAgentRunFailed(event: PluginEvent, ctx: PluginContext): Promise<void> {
-  const runId = event.entityId ?? "";
-  const companyId = event.companyId ?? "";
   ctx.logger.info("agent.run.failed observed", {
-    runId,
-    companyId,
-    event: event.payload,
+    runId: event.entityId,
+    companyId: event.companyId,
+    payload: event.payload,
   });
 }
 
-/**
- * issue.created — observe new issues being created.
- */
 async function handleIssueCreated(event: PluginEvent, ctx: PluginContext): Promise<void> {
-  const payload = event.payload as unknown as IssueCreatedEvent;
-  const issue = payload.issue;
+  const payload = event.payload as IssueCreatedEvent;
   ctx.logger.info("issue.created observed", {
-    issueId: issue.id,
-    status: issue.status,
     companyId: event.companyId,
+    issueId: payload.issue.id,
+    status: payload.issue.status,
   });
 }
 
-/**
- * issue.updated — log status changes for audit trail.
- * Review state is updated reactively via quality_gate.submit / approve / reject.
- */
 async function handleIssueUpdated(event: PluginEvent, ctx: PluginContext): Promise<void> {
-  const payload = event.payload as unknown as IssueUpdatedEvent;
-  const { issue } = payload;
+  const payload = event.payload as IssueUpdatedEvent;
   ctx.logger.info("issue.updated observed", {
-    issueId: issue.id,
-    status: issue.status,
-    previousStatus: payload.previousStatus,
     companyId: event.companyId,
+    issueId: payload.issue.id,
+    status: payload.issue.status,
+    previousStatus: payload.previousStatus,
   });
 }
 
-/**
- * Register all quality_gate event subscriptions on the plugin context.
- */
 export function setupEvents(ctx: PluginContext): void {
   ctx.events.on("agent.run.finished", (event) => handleAgentRunFinished(event, ctx));
   ctx.events.on("agent.run.failed", (event) => handleAgentRunFailed(event, ctx));

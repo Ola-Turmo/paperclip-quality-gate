@@ -1,399 +1,198 @@
-# uos-quality-gate — Specification
+# UOS Quality Gate Specification
 
-> Universal quality gate plugin for [Paperclip](https://github.com/paperclipai/paperclip).
-> v1.0.0 — Public API, semver, no breaking changes without major version bump.
-
----
+Version: 2.0.0
 
 ## 1. Purpose
 
-`uos-quality-gate` is a universal, self-service quality gate for the UOS ecosystem.
-Any agent, department, or reviewer plugin can consume it without coupling.
+UOS Quality Gate is a Paperclip plugin that converts completed work into a structured, reviewer-ready evidence package.
 
-**What it does:** intercepts completed deliverables, scores them against configurable
-thresholds, and enforces a human-approval checkpoint before work is marked `done`.
+The product goal is not just to answer “did this score high enough?” but to help an operator answer:
 
-**What it does NOT do:** host a review UI (Paperclip provides that), manage issues,
-or run agents. Those are owned by other plugins or by Paperclip itself.
+- what was submitted?
+- why did the gate fire?
+- what evidence supports the current state?
+- what is the safest next action?
 
----
+## 2. Product thesis
 
-## 2. Architecture
+A quality gate should be a **reviewable evidence package**, not a single verdict.
 
-```
-src/
-├── manifest.ts       — Plugin identity, ID, version, capabilities
-├── worker.ts         — Thin orchestration layer + data registrations (221 lines)
-├── actions.ts       — Action handlers: submit / approve / reject / assign / bulk_* (445 lines)
-├── events.ts        — Event subscriptions: agent.run.* / issue.* (230 lines)
-├── tools.ts         — Agent tools: quality_gate_review / submit_for_review (269 lines)
-├── helpers.ts       — Pure evaluation, review building, comment formatting (387 lines)
-├── shared.ts        — Runtime helpers needing PluginContext: castParams, getConfig, getReview, putReview
-├── types.ts         — All TypeScript interfaces (221 lines)
-└── ui/
-    ├── index.tsx             — UI entry point
-    ├── QualityGateTab.tsx    — Issue-detail review panel (React)
-    └── settings.tsx          — Settings panel (React)
-```
+Each review therefore stores:
 
-**Architecture pattern:** Clean separation — pure logic in `helpers.ts` (no side effects, fully testable), side-effectful orchestration in `actions.ts` / `events.ts`, UI in React.
+- review trigger metadata
+- display score and decision score
+- structured checks and risk flags
+- draft artifact content
+- evidence refs and trace steps
+- next-step guidance
+- release state
+- reviewer timeline
 
----
+## 3. Public plugin surface
 
-## 3. Protocol — Plugin API Surface
+### 3.1 Actions
 
-All namespaced under `quality_gate.*`. All payloads are versioned.
+| Action | Purpose |
+|---|---|
+| `quality_gate.submit` | Create or refresh a review package |
+| `quality_gate.approve` | Approve and release the deliverable |
+| `quality_gate.approve_hold` | Approve but keep downstream release on hold |
+| `quality_gate.reject` | Request revision |
+| `quality_gate.assign` | Assign or reassign reviewer ownership |
+| `quality_gate.return_to_agent` | Send structured revision guidance back to an agent |
+| `quality_gate.escalate` | Escalate the review to a higher-scope lane |
+| `quality_gate.generate_next_step` | Regenerate next-step guidance |
+| `quality_gate.bulk_approve` | Bulk approve and release |
+| `quality_gate.bulk_reject` | Bulk request revision |
 
-### 3.1 Actions (bridge: UI → plugin worker)
-
-| Action key | Trigger | Description |
-|---|---|---|
-| `quality_gate.submit` | reviewer / agent | Submit a deliverable for quality review |
-| `quality_gate.approve` | reviewer | Approve a deliverable — marks issue `done` |
-| `quality_gate.reject` | reviewer | Reject a deliverable — marks issue `in_progress` |
-| `quality_gate.assign` | reviewer | Reassign a review to a different reviewer |
-| `quality_gate.bulk_approve` | reviewer | Approve multiple deliverables at once |
-| `quality_gate.bulk_reject` | reviewer | Reject multiple deliverables at once |
-
-#### `quality_gate.submit`
-
-```ts
-// params
-{
-  issue_id:      string;   // required
-  summary?:      string;   // deliverable summary (from agent)
-  quality_score?: number;  // 0-10 agent self-assessed score
-  block_approval?: boolean; // true = force human review regardless of score
-  comment?:     string;   // optional reviewer comment
-}
-```
-
-#### `quality_gate.approve`
-
-```ts
-{ issue_id: string; comment?: string }
-```
-
-#### `quality_gate.reject`
-
-```ts
-{ issue_id: string; comment: string }
-```
-
-#### `quality_gate.assign`
-
-```ts
-{ issue_id: string; assigned_to: string }
-```
-
-Idempotent: reassigning to the same person is a no-op.
-
-#### `quality_gate.bulk_approve`
-
-```ts
-{ issue_ids: string[]; comment?: string }
-```
-
-Processes up to 5 approvals concurrently.
-
-#### `quality_gate.bulk_reject`
-
-```ts
-{ issue_ids: string[]; comment: string }
-```
-
-Processes up to 5 rejections concurrently.
-
-### 3.2 Data (bridge: UI widget → plugin worker)
+### 3.2 Data keys
 
 | Data key | Returns |
 |---|---|
-| `quality_gate.review` | `ReviewStatusData` for one issue |
-| `quality_gate.reviews` | `ReviewsListData` for all known reviews (capped at 50 most recent) |
-| `quality_gate.config` | Current `QualityGateSettings` |
-| `quality_gate.trends` | `QualityTrendsData` — per-agent analytics |
+| `quality_gate.review` | Single review package for an issue |
+| `quality_gate.reviews` | Recent review packages for a company |
+| `quality_gate.config` | Active threshold config |
+| `quality_gate.trends` | Aggregated review/agent trend data |
 
-### 3.3 Events subscribed (plugin ← Paperclip host)
+### 3.3 Tools
 
-| Event | When |
+| Tool | Purpose |
 |---|---|
-| `issue.created` | New issue created |
-| `issue.updated` | Issue status/details changed |
-| `agent.run.finished` | Agent run completed — **auto-triggers quality evaluation** |
-| `agent.run.failed` | Agent run crashed — log and skip auto-gate |
+| `quality_gate_review` | Read current review status, risks, and optionally checks/trace |
+| `submit_for_review` | Create or refresh a review package from an agent/tool context |
 
-### 3.4 Streams emitted (plugin → Paperclip host / other plugins)
+### 3.4 Event subscriptions
 
-| Channel | Payload |
-|---|---|
-| `quality_gate.review_created` | `{ review: DeliverableReview }` |
-| `quality_gate.review_updated` | `{ review: DeliverableReview }` |
-| `quality_gate.review_approved` | `{ review: DeliverableReview }` |
-| `quality_gate.review_rejected` | `{ review: DeliverableReview }` |
-| `quality_gate.review_assigned` | `{ review: DeliverableReview }` |
-| `quality_gate.threshold_breached` | `{ review: DeliverableReview; score: number; reason: "auto_rejected" | "block_threshold" }` |
+- `agent.run.finished`
+- `agent.run.failed`
+- `issue.created`
+- `issue.updated`
 
-Any other plugin can subscribe to these channels via `ctx.streams.on`.
+### 3.5 Stream events emitted
 
----
+- `quality_gate.review_created`
+- `quality_gate.review_updated`
+- `quality_gate.review_approved`
+- `quality_gate.review_rejected`
+- `quality_gate.review_assigned`
+- `quality_gate.threshold_breached`
 
-## 4. State Model
+## 4. Review lifecycle
 
-Reviews are stored at **per-issue scope**:
-
-```
-{ scopeKind: "issue", scopeId: <issueId>, stateKey: "reviews" }
-  → DeliverableReview
-```
-
-This is fully atomic. Concurrent reviews on different issues never contend.
-
-The plugin also stores a company-level index of known review IDs:
-
-```
-{ scopeKind: "company", scopeId: <companyId>, stateKey: "review_ids" }
-  → string[]  (ordered by last-updated, capped at 200)
+```text
+submit / agent.run.finished
+        ↓
+  evaluate quality
+        ↓
+  build evidence package
+        ↓
+needs_human_review | pending_review | auto_rejected
+        ↓
+approve_hold / approve / reject / return_to_agent / escalate
+        ↓
+persist issue state + comment + evidence docs + telemetry
 ```
 
----
+## 5. Decision model
 
-## 5. Review Lifecycle
+Inputs:
 
-```
-issue.created
-    │
-    ▼
-[no review] ───────────────────────────────────────────────────────┐
-                                                                │
-                                                        (quality_gate.submit called)
-                                                                │
-                                                                ▼
-                                                        pending_review
-                                                                │
-                                        ┌────────────────────────┴────────────────────────┐
-                                        │                                                 │
-                               agent.run.finished                                 manual submit
-                              (auto-evaluate)                                         │
-                                        │                                                 │
-                                        ▼                                                 ▼
-                              ┌──────────────┐      ┌─────────────────┐    ┌──────────────────────┐
-                              │ score ≥ min  │      │ score < min     │    │ block_approval=true  │
-                              │ no blockers  │      │ no blockers     │    │ (any score)          │
-                              └──────┬───────┘      └────────┬────────┘    └──────────┬───────────┘
-                                     │                      │                       │
-                                     ▼                      ▼                       ▼
-                              in_review             auto-rejected            needs_human_review
-                              (await human)        (in_progress)             (blocked)
-                                     │                      │                       │
-                        ┌────────────┴────────────┐         │                       │
-                        │                         │         │                       │
-               approve_deliverable          reject          │                       │
-                        │                         │         │                       │
-                        ▼                         ▼         │                       │
-                      done                  in_progress      │                       │
-                                                   (agent    │                       │
-                                                    must fix)│                       │
-                                                                 │                       │
-                                                          submit ──┘
-```
+- self-reported quality score
+- block approval flag
+- configured thresholds
+- optional structured checks based on issue metadata
 
----
+Outputs:
 
-## 6. Evaluation Algorithm
+- `inputScore`
+- `decisionScore`
+- `overallScore`
+- `category`
+- `checks`
+- `riskFlags`
+- `summary`
 
-`evaluateQuality(score, blockApproval, config, issueData?)` returns a `QualityEvaluation`:
+Decision rules:
 
-```
-category:
-  score == null/undefined         → "none"
-  score <  autoRejectBelow        → "auto_rejected"
-  blockApproval || score <= block  → "needs_human_review"
-  score >= minQualityScore         → "passed"
-  score between block and min      → "needs_human_review"
+1. Missing score → manual review lane.
+2. Manual block approval → manual review lane.
+3. Decision score below `autoRejectBelow` → auto reject.
+4. Decision score at or below `blockThreshold` → manual review lane.
+5. Decision score at or above `minQualityScore` → reviewer-ready / pass lane.
+6. Passed structured checks can add bonus points to the decision score.
 
-variant: deterministic ±1 from djb2(category + string(score))
-overallScore: clamp(baseScore + variant, 0, 10)
+## 6. Persistence model
 
-checks:
-  - score_threshold  — did the score meet the minimum?
-  - no_blockers      — any blocking flags?
-  - auto_reject       — was auto-reject triggered?
-  - [custom checks]   — from plugin config, evaluated against issue metadata
+### Issue-scoped state
 
-summary: human-readable quality summary string
-autoRejected: boolean
-blockThresholdBreached: boolean
-passed: boolean
-```
+`stateKey: reviews`
 
-Evaluation always runs deterministically — same inputs always produce same outputs.
+Stores the full `DeliverableReview` object.
 
-### Custom Checks
+### Company-scoped state
 
-Custom checks are structured rules defined in plugin config (`QualityGateSettings.customChecks`).
-Each check is evaluated against the issue's live metadata (labels, title, assignee).
+`stateKey: review_ids`
 
-| Check type | Condition |
-|---|---|
-| `label_required` | Issue has the required label |
-| `label_missing` | Issue does NOT have the forbidden label |
-| `title_contains` | Issue title contains all specified keywords |
-| `has_assignee` | Issue has any assignee |
+Stores recent review IDs for company-level list/trend views.
 
----
+### Issue documents
 
-## 7. Configuration (instanceConfigSchema)
+The plugin writes two markdown documents back onto the issue:
 
-```ts
-interface QualityGateSettings {
-  minQualityScore:   number;        // default 7
-  blockThreshold:    number;        // default 5
-  autoRejectBelow:    number;        // default 3
-  customChecks?:      CustomCheck[]; // structured rules evaluated at every review
-}
-```
+- `quality-gate-evidence`
+- `quality-gate-next-step`
 
----
+## 7. UI model
 
-## 8. Tool Definitions (for Paperclip agents)
+The issue detail tab exposes a review cockpit with:
 
-### `quality_gate_review`
+- summary header
+- review status chips
+- metrics
+- draft artifact panel
+- operator action bar
+- risk flag cards
+- evidence bundle panel
+- trace + standards section
+- return-to-agent controls
+- escalation + assignment controls
+- timeline
 
-```
-name:        quality_gate_review
-description: Check quality gate review status for a Paperclip issue.
-parameters:
-  issue_id: { type: string, required: true }
-  include_checks: { type: boolean, default: false }
-```
+## 8. Observability
 
-### `submit_for_review`
+Every major lifecycle action writes:
 
-```
-name:        submit_for_review
-description: Submit a completed deliverable for quality gate review.
-parameters:
-  issue_id:      { type: string, required: true }
-  summary:       { type: string }
-  quality_score:  { type: number }
-  block_approval: { type: boolean }
-  comment:       { type: string }
-```
+- metrics (`quality_gate.<event>`)
+- telemetry envelope
+- issue comment
+- optional activity entry when supported
 
----
+Telemetry includes:
 
-## 9. Event Payloads
+- company ID
+- issue ID
+- review ID
+- decision type
+- review status/category
+- display score
+- decision score
+- review-required signal
+- risk count
+- released signal
 
-### `agent.run.finished`
+## 9. Security posture
 
-The plugin correlates the `runId` (from `event.entityId`) to an issue by matching
-`executionRunId` or `checkoutRunId` on the issue. It then auto-evaluates:
+- no secrets are stored in plugin state
+- all side effects are routed through Paperclip host APIs
+- issue/document writes are best-effort and error-contained
+- dependency audit should be run in CI and during upgrades
 
-```ts
-interface AgentRunFinishedEvent {
-  agentId: string;
-  status: "completed" | "failed" | "cancelled";
-  summary?: string;
-  qualityScore?: number;
-  blockApproval?: boolean;
-}
-```
+## 10. Verification standard
 
-### `agent.run.failed`
+Before release, the project should pass:
 
-```ts
-// Logged only — no auto-gate triggered since no deliverable was produced.
-```
-
----
-
-## 10. DeliverableReview Shape
-
-```ts
-interface DeliverableReview {
-  id:               string;       // format: review_<issueId>_<uuid>
-  issueId:          string;
-  companyId:        string;
-  status:           ReviewStatus;
-  qualityScore:     number;       // 0-10 (with ±1 deterministic variance)
-  blockApproval:    boolean;
-  category:         QualityCategory;
-  checks:           QualityCheck[];
-  evaluationSummary: string;
-  submitterName:    string;
-  agentId?:         string;       // set on auto-evaluated reviews
-  assignedTo?:      string;       // set by quality_gate.assign
-  history:          ReviewAction[]; // capped at 50 entries
-  createdAt:        string;       // ISO 8601
-  updatedAt:        string;       // ISO 8601
-}
-```
-
----
-
-## 11. Trend Analytics
-
-`quality_gate.trends` returns per-agent quality statistics:
-
-```ts
-export interface AgentTrend {
-  agentId:            string;
-  displayName:        string;
-  avgQualityScore:    number;
-  approvedCount:      number;
-  rejectedCount:      number;
-  autoRejectedCount:  number;
-  needsHumanReviewCount: number;
-  approvalRate:       number;      // percentage
-  autoRejectRate:     number;     // percentage
-  totalReviews:       number;
-  /** Most recent quality scores (newest first, capped at 10). */
-  recentScores?:      { score: number; status: ReviewStatus; createdAt: string }[];
-}
-
-export interface QualityTrendsData {
-  agents:           AgentTrend[];
-  overallAvgScore:  number;
-  totalReviews:     number;
-}
-```
-
-Agents with no `agentId` are grouped under `_manual_` (Manual Submission).
-
----
-
-## 12. Error Handling
-
-| Error | Behavior |
-|---|---|
-| Issue not found | `{{ ok: false, error: "Issue not found" }}` |
-| Review not found | `{{ ok: false, error: "No review found for this issue" }}` |
-| Already approved | `{{ ok: true, message: "Already approved" }}` — idempotent |
-| Already rejected | `{{ ok: true, message: "Already rejected" }}` — idempotent |
-| SDK error (API call fails) | Log + return `{{ ok: false, error: "..." }}` — never throw |
-
----
-
-## 13. Integration Contract
-
-Other UOS plugins consume `uos-quality-gate` by:
-
-1. **Calling actions**: `ctx.actions.invoke("quality_gate.submit", { issue_id, ... })`
-2. **Subscribing to streams**: `ctx.streams.on("quality_gate.review_approved", handler)`
-3. **Querying data**: `ctx.data.get("quality_gate.review", { issueId })`
-4. **Declaring dependency** in their manifest: no formal dependency system yet — rely on `uos-quality-gate` being installed
-
----
-
-## 14. Versioning Policy
-
-- **Semver** from v1.0.0 — patch = bugfix, minor = additive, major = breaking
-- Protocol (action/data keys, event channels, payload shapes) is the public API
-- Internal helpers, state key names, and implementation details may change
-- Breaking changes to the protocol require a major version bump + migration guide
-
----
-
-## 15. Canonical Source of Truth
-
-`github.com/Ola-Turmo/uos-quality-gate` — all other copies are mirrors.
+- typecheck
+- tests
+- plugin build
+- dependency audit review
+- manual UI/doc/image quality pass

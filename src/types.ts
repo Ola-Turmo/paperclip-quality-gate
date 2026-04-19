@@ -1,24 +1,8 @@
-import type { Issue, IssueComment } from "@paperclipai/shared";
-
-// ── Config ──────────────────────────────────────────────────────────────────
-
-/**
- * Custom quality checks — defined in plugin config, evaluated at review time.
- * Each check is a structured rule (no arbitrary code execution).
- * Custom checks are evaluated against the issue's current metadata (labels, title, assignee).
- */
 export interface CustomCheck {
   id: string;
   name: string;
-  /** The type of check — determines which fields of `params` are used. */
-  type:
-    | "label_required"    // params.value = label name
-    | "label_missing"     // params.value = label name
-    | "title_contains"    // params.value = comma-separated keywords
-    | "has_assignee";     // no params needed
-  /** Type-specific parameter value. */
+  type: "label_required" | "label_missing" | "title_contains" | "has_assignee";
   value?: string;
-  /** Score contribution (0–10) when passed. Defaults to 0. */
   scoreBonus?: number;
 }
 
@@ -26,19 +10,18 @@ export interface QualityGateSettings {
   minQualityScore: number;
   blockThreshold: number;
   autoRejectBelow: number;
-  /** Structured custom checks evaluated at every review. */
   customChecks?: CustomCheck[];
 }
 
-/**
- * Issue metadata used during custom check evaluation.
- * Populated at evaluation time from the live issue object.
- */
 export interface IssueMetadata {
   labels?: string[];
   title?: string;
   assignee?: string;
+  description?: string;
+  status?: string;
 }
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export type QualityCategory =
   | "none"
@@ -46,7 +29,8 @@ export type QualityCategory =
   | "needs_human_review"
   | "blocked"
   | "auto_rejected"
-  | "rejected";
+  | "rejected"
+  | "escalated";
 
 export interface QualityCheck {
   id: string;
@@ -56,7 +40,78 @@ export interface QualityCheck {
   details?: string;
 }
 
+export interface RiskFlag {
+  id: string;
+  label: string;
+  level: RiskLevel;
+  detail: string;
+  source: "score" | "check" | "operator" | "system";
+}
+
+export interface EvidenceRef {
+  id: string;
+  kind: "issue" | "summary" | "comment" | "check" | "standard" | "trace" | "instruction" | "document";
+  label: string;
+  value: string;
+}
+
+export interface TraceStep {
+  label: string;
+  value: string;
+  emphasis?: "observed" | "mutated" | "decision";
+}
+
+export interface EvidenceBundle {
+  inputRefs: EvidenceRef[];
+  retrievedContext: EvidenceRef[];
+  standards: string[];
+  trace: TraceStep[];
+  hash: string;
+  documentKey: string;
+}
+
+export interface DraftArtifact {
+  artifactType: "deliverable_summary" | "message" | "document" | "generic";
+  title: string;
+  bodyMd: string;
+  confidence: number;
+  revision: number;
+  riskLabels: string[];
+}
+
+export interface ReviewTrigger {
+  source: "manual_submit" | "agent_run_finished" | "tool_submit" | "resubmission";
+  actorLabel: string;
+  agentId?: string;
+  runId?: string;
+  summary?: string;
+  createdAt: string;
+}
+
+export interface ReleaseDecision {
+  approvalState: "pending" | "approved_hold" | "released" | "rejected" | "escalated";
+  approvedBy?: string;
+  releasedBy?: string;
+  releasedAt?: string;
+}
+
+export interface HandoffTask {
+  targetAgentId?: string;
+  instructionMd: string;
+  status: "idle" | "queued" | "returned_to_agent" | "awaiting_agent" | "resolved" | "escalated";
+  linkedIssueId?: string;
+  updatedAt: string;
+}
+
+export interface ReviewSummary {
+  headline: string;
+  disposition: string;
+  reviewerHint: string;
+}
+
 export interface QualityEvaluation {
+  inputScore: number;
+  decisionScore: number;
   overallScore: number;
   category: QualityCategory;
   checks: QualityCheck[];
@@ -64,16 +119,16 @@ export interface QualityEvaluation {
   autoRejected: boolean;
   blockThresholdBreached: boolean;
   passed: boolean;
+  riskFlags: RiskFlag[];
 }
-
-// ── Review ──────────────────────────────────────────────────────────────────
 
 export type ReviewStatus =
   | "pending_review"
   | "needs_human_review"
   | "auto_rejected"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "escalated";
 
 export interface ReviewAction {
   action: string;
@@ -91,19 +146,26 @@ export interface DeliverableReview {
   companyId: string;
   status: ReviewStatus;
   qualityScore: number;
+  decisionScore: number;
   blockApproval: boolean;
   category: QualityCategory;
   checks: QualityCheck[];
+  riskFlags: RiskFlag[];
   evaluationSummary: string;
   submitterName: string;
   agentId?: string;
   assignedTo?: string;
   history: ReviewAction[];
+  trigger: ReviewTrigger;
+  evidenceBundle: EvidenceBundle;
+  draftArtifact: DraftArtifact;
+  releaseDecision: ReleaseDecision;
+  handoffTask: HandoffTask;
+  nextStepTemplate: string;
+  reviewSummary: ReviewSummary;
   createdAt: string;
   updatedAt: string;
 }
-
-// ── Action params ───────────────────────────────────────────────────────────
 
 export interface SubmitForReviewParams {
   issue_id: string;
@@ -138,16 +200,35 @@ export interface BulkRejectParams {
   comment: string;
 }
 
-// ── Standard result ─────────────────────────────────────────────────────────
+export interface ApproveHoldParams {
+  issue_id: string;
+  comment?: string;
+}
+
+export interface ReturnToAgentParams {
+  issue_id: string;
+  instruction: string;
+  target_agent_id?: string;
+}
+
+export interface EscalateParams {
+  issue_id: string;
+  comment: string;
+  escalate_to?: string;
+}
+
+export interface GenerateNextStepParams {
+  issue_id: string;
+  goal?: "revision" | "follow_up" | "release";
+}
 
 export interface ActionResult<T = unknown> {
   ok: boolean;
   review?: T;
   message?: string;
   error?: string;
+  template?: string;
 }
-
-// ── Event payloads ──────────────────────────────────────────────────────────
 
 export interface IssueCreatedEvent {
   issue: { id: string; title?: string; status?: string; assigneeId?: string };
@@ -158,11 +239,6 @@ export interface IssueUpdatedEvent {
   previousStatus?: string;
 }
 
-export interface CommentCreatedEvent {
-  comment: { id: string; body?: string; authorId?: string };
-  issueId: string;
-}
-
 export interface AgentRunFinishedEvent {
   agentId: string;
   status: "completed" | "failed" | "cancelled";
@@ -170,8 +246,6 @@ export interface AgentRunFinishedEvent {
   qualityScore?: number;
   blockApproval?: boolean;
 }
-
-// ── UI data shapes ──────────────────────────────────────────────────────────
 
 export interface ReviewStatusData {
   review: DeliverableReview;
@@ -183,7 +257,37 @@ export interface ReviewsListData {
   total: number;
 }
 
-// ── Agent tools ─────────────────────────────────────────────────────────────
+export interface ReviewQueueItem {
+  reviewId: string;
+  issueId: string;
+  title: string;
+  status: ReviewStatus;
+  approvalState: ReleaseDecision["approvalState"];
+  decisionScore: number;
+  qualityScore: number;
+  assignedTo?: string;
+  updatedAt: string;
+  headline: string;
+  topRiskLabel?: string;
+  topRiskLevel?: RiskLevel;
+}
+
+export interface ReviewQueueSummary {
+  totalReviews: number;
+  pendingReviews: number;
+  approvedHoldReviews: number;
+  releasedReviews: number;
+  escalatedReviews: number;
+  revisionQueueReviews: number;
+  highRiskReviews: number;
+  unassignedPendingReviews: number;
+  averageDecisionScore: number;
+}
+
+export interface ReviewQueueData {
+  items: ReviewQueueItem[];
+  summary: ReviewQueueSummary;
+}
 
 export interface QualityGateReviewInput {
   issue_id: string;
@@ -198,8 +302,6 @@ export interface SubmitForReviewInput {
   comment?: string;
 }
 
-// ── Trend analytics ──────────────────────────────────────────────────────────
-
 export interface AgentTrend {
   agentId: string;
   displayName: string;
@@ -211,9 +313,9 @@ export interface AgentTrend {
   approvalRate: number;
   autoRejectRate: number;
   totalReviews: number;
-  /** Most recent quality scores (newest first) for score history. */
   recentScores?: { score: number; status: ReviewStatus; createdAt: string }[];
 }
+
 export interface QualityTrendsData {
   agents: AgentTrend[];
   overallAvgScore: number;
