@@ -86,7 +86,7 @@ This release reframes the project from a threshold-only gate into a reusable **h
 4. The reviewer approves, holds, revises, returns, or escalates.
 5. The final state is written back to the Paperclip issue and audit trail.
 
-## Key capabilities in v2
+## Key capabilities in v2.1
 
 ### Actions
 
@@ -105,6 +105,7 @@ This release reframes the project from a threshold-only gate into a reusable **h
 
 - `quality_gate.review`
 - `quality_gate.reviews`
+- `quality_gate.queue`
 - `quality_gate.config`
 - `quality_gate.trends`
 
@@ -127,8 +128,10 @@ This release reframes the project from a threshold-only gate into a reusable **h
 - `src/shared.ts` — state, issue snapshot, observability, document persistence
 - `src/tools.ts` — agent tools for submit/read flows
 - `src/worker.ts` — plugin bootstrap and data registrations
+- `src/ui/QualityGateDashboard.tsx` — company-level reviewer inbox page
+- `src/ui/QualityGateDashboardWidget.tsx` — dashboard widget queue snapshot
 - `src/ui/QualityGateTab.tsx` — reviewer cockpit tab
-- `src/ui/settings.tsx` — threshold/settings view
+- `src/ui/settings.tsx` — read-only threshold/settings view
 
 For deeper technical detail, see:
 
@@ -189,4 +192,5 @@ Those capabilities can sit beside this plugin, but this repository focuses on th
 - Type-safe
 - Test-covered for the core review builders
 - Buildable with current Paperclip SDK
+- Generated marketing images manually checked for readability and visual consistency
 - Ready for self-hosted Paperclip workflows that need human review before release

@@ -6,8 +6,15 @@ This guide is for reviewers, operators, and leads who need to decide whether an 
 
 ## Standard workflow
 
-### 1. Open the issue-level Quality Gate tab
-Start with the issue that is pending review, auto-rejected, or escalated.
+### 1. Start in the queue
+Open the company-level Quality Gate page or dashboard widget to identify:
+
+- what needs review now
+- what is already approved but still on hold
+- which packages are high risk
+- which pending packages have no owner
+
+Then open the issue-level Quality Gate tab for the specific package that needs action.
 
 ### 2. Read the reviewer summary
 Use the summary headline and reviewer cue to understand:

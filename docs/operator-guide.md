@@ -25,6 +25,14 @@ The detail tab presents:
 - next-step template
 - reviewer timeline
 
+The company-level queue page and dashboard widget present:
+
+- pending review counts
+- approved-hold vs released package counts
+- high-risk package alerts
+- reviewer ownership gaps
+- bulk triage controls
+
 ## Recommended reviewer flow
 
 ### Approve and hold

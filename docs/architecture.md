@@ -12,8 +12,10 @@ UOS Quality Gate is organized around a small set of focused modules:
 | `src/events.ts` | Host event subscriptions and auto-review wiring |
 | `src/tools.ts` | Agent-facing tool entry points |
 | `src/worker.ts` | Plugin setup, data registration, worker entrypoint |
+| `src/ui/QualityGateDashboard.tsx` | Company-level reviewer queue page |
+| `src/ui/QualityGateDashboardWidget.tsx` | Dashboard widget queue summary |
 | `src/ui/QualityGateTab.tsx` | Reviewer cockpit UI |
-| `src/ui/settings.tsx` | Settings/threshold UI |
+| `src/ui/settings.tsx` | Read-only settings/threshold UI |
 
 ## Data flow
 
@@ -28,7 +30,7 @@ agent/tool/operator submit
         ↓
  issue status/comment/activity/telemetry
         ↓
- detail tab renders review package
+ detail tab / queue page / widget render review package state
 ```
 
 ## Review object model

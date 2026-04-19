@@ -1,6 +1,6 @@
 # UOS Quality Gate Specification
 
-Version: 2.0.0
+Version: 2.1.0
 
 ## 1. Purpose
 
@@ -51,6 +51,7 @@ Each review therefore stores:
 |---|---|
 | `quality_gate.review` | Single review package for an issue |
 | `quality_gate.reviews` | Recent review packages for a company |
+| `quality_gate.queue` | Company review queue summary + queue items |
 | `quality_gate.config` | Active threshold config |
 | `quality_gate.trends` | Aggregated review/agent trend data |
 
@@ -158,6 +159,13 @@ The issue detail tab exposes a review cockpit with:
 - escalation + assignment controls
 - timeline
 
+The company-level reviewer surface adds:
+
+- dashboard widget summary
+- full-page review queue
+- bulk approve and bulk revision actions
+- trend sidebar for agent quality performance
+
 ## 8. Observability
 
 Every major lifecycle action writes:
@@ -183,6 +191,7 @@ Telemetry includes:
 ## 9. Security posture
 
 - no secrets are stored in plugin state
+- common token and credential patterns are redacted before reviewer comments, evidence markdown, and draft artifacts are persisted
 - all side effects are routed through Paperclip host APIs
 - issue/document writes are best-effort and error-contained
 - dependency audit should be run in CI and during upgrades
