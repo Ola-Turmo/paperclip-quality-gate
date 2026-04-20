@@ -37,6 +37,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "ui.detailTab.register",
     "ui.page.register",
     "ui.dashboardWidget.register",
+    "instance.settings.register",
   ],
   entrypoints: {
     worker: "./dist/worker.js",
