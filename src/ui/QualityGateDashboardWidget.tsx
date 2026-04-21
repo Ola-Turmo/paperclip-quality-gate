@@ -36,7 +36,7 @@ export function QualityGateDashboardWidget({ context }: PluginWidgetProps) {
           <div style={{ fontSize: 12, color: "#38bdf8", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.1 }}>Quality Gate</div>
           <h3 style={{ margin: "6px 0 0", fontSize: 22 }}>Release queue snapshot</h3>
         </div>
-        <div style={{ fontSize: 13, color: "#94a3b8" }}>{queueQuery.loading && !queueQuery.data ? "Loading…" : `${summary?.totalReviews ?? 0} total`}</div>
+        <div style={{ fontSize: 13, color: "#94a3b8" }}>{queueQuery.loading && !queueQuery.data ? "Loading..." : `${summary?.totalReviews ?? 0} total`}</div>
       </div>
 
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", marginBottom: 14 }}>
@@ -48,14 +48,14 @@ export function QualityGateDashboardWidget({ context }: PluginWidgetProps) {
       <div style={{ padding: 12, borderRadius: 14, background: "rgba(2,6,23,0.8)", border: "1px solid #1e293b" }}>
         <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Average decision score</div>
         <div style={{ fontSize: 24, fontWeight: 800, color: metricColor(summary?.averageDecisionScore ?? 0) }}>{summary?.averageDecisionScore ?? 0}/10</div>
-        <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{summary?.highRiskReviews ?? 0} high-risk packages · {summary?.unassignedPendingReviews ?? 0} unassigned pending</div>
+        <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{summary?.highRiskReviews ?? 0} high-risk packages | {summary?.unassignedPendingReviews ?? 0} unassigned pending</div>
       </div>
 
       {topItem ? (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #1f2937" }}>
           <div style={{ fontSize: 12, color: "#38bdf8", fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Most recent package</div>
           <div style={{ fontWeight: 700 }}>{topItem.title}</div>
-          <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 4 }}>{topItem.issueId} · {topItem.headline}</div>
+          <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 4 }}>{topItem.issueId} | {topItem.headline}</div>
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>Risk: {topItem.topRiskLabel ?? "No active risk"}</div>
         </div>
       ) : null}
