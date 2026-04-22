@@ -136,10 +136,11 @@ async function handleIssueCreated(event: PluginEvent, ctx: PluginContext): Promi
 
 async function handleIssueUpdated(event: PluginEvent, ctx: PluginContext): Promise<void> {
   const payload = event.payload as IssueUpdatedEvent;
+  const issue = payload?.issue;
   ctx.logger.info("issue.updated observed", {
     companyId: event.companyId,
-    issueId: payload.issue.id,
-    status: payload.issue.status,
+    issueId: issue?.id ?? event.entityId ?? null,
+    status: issue?.status ?? null,
     previousStatus: payload.previousStatus,
   });
 }
