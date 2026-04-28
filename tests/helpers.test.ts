@@ -13,26 +13,44 @@ import { DEFAULT_CONFIG } from "../src/manifest.js";
 
 describe("evaluateQuality", () => {
   it("uses passed custom checks to increase the decision score", () => {
-    const result = evaluateQuality(6, false, {
-      ...DEFAULT_CONFIG,
-      customChecks: [
-        { id: "has-assignee", name: "Has assignee", type: "has_assignee", scoreBonus: 2 },
-      ],
-    }, {
-      title: "Ship outreach review cockpit",
-      assignee: "agent-reviewer",
-    });
+    const result = evaluateQuality(
+      6,
+      false,
+      {
+        ...DEFAULT_CONFIG,
+        customChecks: [
+          {
+            id: "has-assignee",
+            name: "Has assignee",
+            type: "has_assignee",
+            scoreBonus: 2,
+          },
+        ],
+      },
+      {
+        title: "Ship outreach review cockpit",
+        assignee: "agent-reviewer",
+      },
+    );
 
     assert.equal(result.decisionScore, 8);
     assert.equal(result.category, "passed");
-    assert.equal(result.checks.some((check) => check.id === "custom_has-assignee" && check.passed), true);
+    assert.equal(
+      result.checks.some(
+        (check) => check.id === "custom_has-assignee" && check.passed,
+      ),
+      true,
+    );
   });
 
   it("keeps missing scores in the manual review lane", () => {
     const result = evaluateQuality(undefined, false, DEFAULT_CONFIG);
     assert.equal(result.category, "none");
     assert.equal(result.blockThresholdBreached, true);
-    assert.equal(result.riskFlags.some((flag) => flag.id === "missing-score"), true);
+    assert.equal(
+      result.riskFlags.some((flag) => flag.id === "missing-score"),
+      true,
+    );
   });
 
   it("lets block approval override auto rejection", () => {
@@ -73,8 +91,14 @@ describe("review package builders", () => {
     assert.equal(review.status, "pending_review");
     assert.ok(review.evidenceBundle.hash.startsWith("qh_"));
     assert.equal(review.draftArtifact.revision, 1);
-    assert.match(review.nextStepTemplate, /Revision brief|Release checklist|Follow-up instruction/);
-    assert.match(buildEvidenceMarkdown(review), /Quality gate evidence package/);
+    assert.match(
+      review.nextStepTemplate,
+      /Revision brief|Release checklist|Follow-up instruction/,
+    );
+    assert.match(
+      buildEvidenceMarkdown(review),
+      /Quality gate evidence package/,
+    );
   });
 
   it("recomputes summary and next-step guidance on status updates", () => {
@@ -92,27 +116,33 @@ describe("review package builders", () => {
       },
     });
 
-    const updated = updateReviewStatus(review, "approved", {
-      action: "approved_hold",
-      reviewer: "user",
-      reviewerName: "Reviewer",
-    }, {
-      releaseDecision: {
-        approvalState: "approved_hold",
-        approvedBy: "Reviewer",
+    const updated = updateReviewStatus(
+      review,
+      "approved",
+      {
+        action: "approved_hold",
+        reviewer: "user",
+        reviewerName: "Reviewer",
       },
-      nextStepTemplate: buildNextStepTemplate(review, "release"),
-    });
+      {
+        releaseDecision: {
+          approvalState: "approved_hold",
+          approvedBy: "Reviewer",
+        },
+        nextStepTemplate: buildNextStepTemplate(review, "release"),
+      },
+    );
 
     assert.equal(updated.reviewSummary.disposition, "Approved and held");
     assert.match(updated.nextStepTemplate, /Release checklist/);
   });
 });
 
-
 describe("security redaction", () => {
   it("redacts common secret patterns before storing evidence text", () => {
-    const redacted = redactSensitiveText("Use sk-123456789012345678901234 and Bearer abcdefghijklmnopqrstuvwxyz123456");
+    const redacted = redactSensitiveText(
+      "Use sk-123456789012345678901234 and Bearer abcdefghijklmnopqrstuvwxyz123456",
+    );
     assert.match(redacted, /\[REDACTED API KEY\]/);
     assert.match(redacted, /Bearer \[REDACTED\]/);
   });
@@ -132,7 +162,11 @@ describe("review queue snapshot", () => {
         createdAt: "2026-04-19T07:00:00.000Z",
       },
     });
-    approved.releaseDecision = { approvalState: "released", releasedBy: "Reviewer", releasedAt: "2026-04-19T07:10:00.000Z" };
+    approved.releaseDecision = {
+      approvalState: "released",
+      releasedBy: "Reviewer",
+      releasedAt: "2026-04-19T07:10:00.000Z",
+    };
     approved.updatedAt = "2026-04-19T07:05:00.000Z";
     approved.status = "approved";
 
@@ -151,8 +185,22 @@ describe("review queue snapshot", () => {
     pending.updatedAt = "2026-04-19T07:30:00.000Z";
 
     const queue = buildReviewQueueData([
-      { review: approved, issue: { id: approved.issueId, title: "Approved draft", status: "done" } },
-      { review: pending, issue: { id: pending.issueId, title: "Needs review", status: "in_review" } },
+      {
+        review: approved,
+        issue: {
+          id: approved.issueId,
+          title: "Approved draft",
+          status: "done",
+        },
+      },
+      {
+        review: pending,
+        issue: {
+          id: pending.issueId,
+          title: "Needs review",
+          status: "in_review",
+        },
+      },
     ]);
 
     assert.equal(queue.summary.totalReviews, 2);

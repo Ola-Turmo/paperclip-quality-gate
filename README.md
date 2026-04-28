@@ -20,6 +20,7 @@ UOS Quality Gate fixes that by packaging every submission into an auditable revi
 ## What it delivers
 
 ### 1. Evidence package per deliverable
+
 Every review stores:
 
 - triggering source and actor
@@ -31,6 +32,7 @@ Every review stores:
 - reviewer action timeline
 
 ### 2. Operator-first review surface
+
 Operators can:
 
 - approve and release
@@ -43,12 +45,15 @@ Operators can:
 ![Review surface](docs/images/quality-gate-review-surface.png)
 
 ### 3. Auditability built into the workflow
+
 The plugin persists issue-linked markdown artifacts for the evidence package and the next-step brief, so downstream teams can reconstruct what happened and why.
 
 ### 4. Company-level reviewer inbox
+
 A dashboard widget and company page summarize queue pressure, review holds, released work, and high-risk packages so leads can triage the next decisions fast.
 
 ### 5. Paperclip-native integration
+
 The plugin is built around the Paperclip plugin SDK and plugs into the host control plane through:
 
 - events
@@ -64,11 +69,13 @@ The plugin is built around the Paperclip plugin SDK and plugs into the host cont
 This release reframes the project from a threshold-only gate into a reusable **human-in-the-loop review workbench**.
 
 ### Before
+
 - score-only gating
 - thin approval flow
 - limited evidence and weak operator ergonomics
 
 ### Now
+
 - structured evidence bundle
 - decision score plus risk flags
 - draft artifact + confidence signal

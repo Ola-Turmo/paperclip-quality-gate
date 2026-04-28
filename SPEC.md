@@ -32,35 +32,35 @@ Each review therefore stores:
 
 ### 3.1 Actions
 
-| Action | Purpose |
-|---|---|
-| `quality_gate.submit` | Create or refresh a review package |
-| `quality_gate.approve` | Approve and release the deliverable |
-| `quality_gate.approve_hold` | Approve but keep downstream release on hold |
-| `quality_gate.reject` | Request revision |
-| `quality_gate.assign` | Assign or reassign reviewer ownership |
-| `quality_gate.return_to_agent` | Send structured revision guidance back to an agent |
-| `quality_gate.escalate` | Escalate the review to a higher-scope lane |
-| `quality_gate.generate_next_step` | Regenerate next-step guidance |
-| `quality_gate.bulk_approve` | Bulk approve and release |
-| `quality_gate.bulk_reject` | Bulk request revision |
+| Action                            | Purpose                                            |
+| --------------------------------- | -------------------------------------------------- |
+| `quality_gate.submit`             | Create or refresh a review package                 |
+| `quality_gate.approve`            | Approve and release the deliverable                |
+| `quality_gate.approve_hold`       | Approve but keep downstream release on hold        |
+| `quality_gate.reject`             | Request revision                                   |
+| `quality_gate.assign`             | Assign or reassign reviewer ownership              |
+| `quality_gate.return_to_agent`    | Send structured revision guidance back to an agent |
+| `quality_gate.escalate`           | Escalate the review to a higher-scope lane         |
+| `quality_gate.generate_next_step` | Regenerate next-step guidance                      |
+| `quality_gate.bulk_approve`       | Bulk approve and release                           |
+| `quality_gate.bulk_reject`        | Bulk request revision                              |
 
 ### 3.2 Data keys
 
-| Data key | Returns |
-|---|---|
-| `quality_gate.review` | Single review package for an issue |
-| `quality_gate.reviews` | Recent review packages for a company |
-| `quality_gate.queue` | Company review queue summary + queue items |
-| `quality_gate.config` | Active threshold config |
-| `quality_gate.trends` | Aggregated review/agent trend data |
+| Data key               | Returns                                    |
+| ---------------------- | ------------------------------------------ |
+| `quality_gate.review`  | Single review package for an issue         |
+| `quality_gate.reviews` | Recent review packages for a company       |
+| `quality_gate.queue`   | Company review queue summary + queue items |
+| `quality_gate.config`  | Active threshold config                    |
+| `quality_gate.trends`  | Aggregated review/agent trend data         |
 
 ### 3.3 Tools
 
-| Tool | Purpose |
-|---|---|
+| Tool                  | Purpose                                                        |
+| --------------------- | -------------------------------------------------------------- |
 | `quality_gate_review` | Read current review status, risks, and optionally checks/trace |
-| `submit_for_review` | Create or refresh a review package from an agent/tool context |
+| `submit_for_review`   | Create or refresh a review package from an agent/tool context  |
 
 ### 3.4 Event subscriptions
 

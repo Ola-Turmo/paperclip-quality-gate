@@ -15,14 +15,14 @@
 
 **Status:** v1.0.0 — Public API, semver-stable. Production-ready with a clean, well-scoped protocol surface.
 
-| Attribute | Value |
-|---|---|
-| Plugin SDK | `@paperclipai/plugin-sdk` v2026.403.0 |
-| Language | TypeScript (ESM) |
-| React | v18.3.1 (UI components only) |
-| Build | esbuild |
-| Tests | Node.js built-in `node --test` (smoke tests) |
-| License | MIT |
+| Attribute  | Value                                        |
+| ---------- | -------------------------------------------- |
+| Plugin SDK | `@paperclipai/plugin-sdk` v2026.403.0        |
+| Language   | TypeScript (ESM)                             |
+| React      | v18.3.1 (UI components only)                 |
+| Build      | esbuild                                      |
+| Tests      | Node.js built-in `node --test` (smoke tests) |
+| License    | MIT                                          |
 
 ---
 
@@ -87,10 +87,10 @@ Fully atomic. Concurrent reviews on different issues never contend.
 
 ### 2.4 Agent Tools (for Paperclip agents)
 
-| Tool | Purpose |
-|---|---|
-| `quality_gate_review` | Check review status for an issue (read-only) |
-| `submit_for_review` | Submit a completed deliverable for quality gate review |
+| Tool                  | Purpose                                                |
+| --------------------- | ------------------------------------------------------ |
+| `quality_gate_review` | Check review status for an issue (read-only)           |
+| `submit_for_review`   | Submit a completed deliverable for quality gate review |
 
 ---
 
@@ -113,17 +113,21 @@ Fully atomic. Concurrent reviews on different issues never contend.
 ### ⚠️ Concerns
 
 **3.7 `as unknown as` casts in `worker.ts:163`.** The line:
+
 ```typescript
 const p = params as unknown as SubmitForReviewParams;
 ```
+
 This double-cast (`as unknown as`) is a code smell — it bypasses TypeScript's type system. The root cause is that `params` from `ctx.actions.register` is typed as `Record<string, unknown>`, but the function receives it as `unknown`. The correct fix is a proper type guard or a single `as SubmitForReviewParams` with a commented explanation, or better: use a typed `ParameterOverrides` pattern if the SDK supports it.
 
 **3.8 No null check on `issue?.companyId` before use.** In `quality_gate.submit` (worker.ts:175), `companyId` is used in `ctx.state.get` even when empty string. While subsequent guards prevent crashes, an explicit early-return for empty `companyId` would be cleaner.
 
 **3.9 Review ID generation is non-deterministic.** In `helpers.ts:158`:
+
 ```typescript
-id: `review_${fields.issueId}_${Date.now()}`
+id: `review_${fields.issueId}_${Date.now()}`;
 ```
+
 `Date.now()` makes the review ID depend on wall-clock time. In concurrent scenarios (same issue, multiple rapid submissions), this could theoretically produce collisions within the same millisecond. Consider using a UUID or djb2 hash of the issueId + timestamp + random.
 
 **3.10 `worker.ts` is 862 lines.** This is getting large. While the organization is logical (actions, data, tools, events sections), future growth should consider splitting into multiple files (e.g., `actions.ts`, `events.ts`, `tools.ts` imported into `worker.ts`).
@@ -188,6 +192,7 @@ finalScore: clamp(baseScore + variance, 0, 10)
 | `autoRejectBelow` | 3 | Score < 3 → auto-rejected, agent must fix |
 
 **Three quality checks generated per evaluation:**
+
 1. `score_threshold` — did the score meet the minimum?
 2. `no_blockers` — any blocking flags?
 3. `auto_reject` — was auto-reject triggered?
@@ -201,6 +206,7 @@ The SPEC.md documents that `agent.run.finished` should auto-trigger quality eval
 > `agent.run.finished` — Agent run completed — **auto-triggers quality evaluation**
 
 But scanning `worker.ts` for event subscriptions:
+
 - `issue.created` → registered ✅
 - `issue.updated` → registered ✅
 - `agent.run.finished` → **MISSING** ❌
@@ -209,6 +215,7 @@ But scanning `worker.ts` for event subscriptions:
 **This is a documented spec item that is not yet implemented.** The `quality_gate.submit` action can be called manually, but the auto-trigger on agent completion is not wired up.
 
 **Fix required:** Add event subscriptions in `plugin.setup()`:
+
 ```typescript
 ctx.events.on("agent.run.finished", async (event: PluginEvent) => {
   const payload = event.payload as AgentRunFinishedEvent;
@@ -230,6 +237,7 @@ The `src/ui/` directory exists with `QualityGateTab.tsx` and `index.tsx`, but th
 ### ✅ Strengths
 
 **5.1 Input validation on all actions.** Every action handler validates required fields before proceeding:
+
 - `quality_gate.submit` → requires `issue_id`
 - `quality_gate.reject` → requires `issue_id` AND `comment`
 - `quality_gate.approve` → requires `issue_id`
@@ -251,9 +259,11 @@ The `src/ui/` directory exists with `QualityGateTab.tsx` and `index.tsx`, but th
 **6.1 State reads are per-issue, fully isolated.** No cross-issue contention. Each review is an independent atomic write.
 
 **6.2 Company-level index capped at 200.** `putReview` does:
+
 ```typescript
 const next = ids.includes(review.id) ? ids : [review.id, ...ids].slice(0, 200);
 ```
+
 This is a smart safeguard against unbounded index growth.
 
 **6.3 `quality_gate.reviews` iterates sequentially with individual try/catch.** For companies with many reviews, this could be slow. Consider parallel `Promise.all` with a limit, or a batch state read if the SDK supports it.
@@ -264,13 +274,13 @@ This is a smart safeguard against unbounded index growth.
 
 ## 7. Scalability Evaluation
 
-| Dimension | Current | Assessment |
-|---|---|---|
-| Reviews per company | Capped at 200 in index | Could be higher; 200 is conservative |
-| Reviews per issue | Unbounded history | ⚠️ Should cap history per review |
-| Concurrent submissions | No lock needed (per-issue atomic) | ✅ Scales horizontally |
-| Plugin instances | One per company | ✅ Stateless design |
-| Companies | Unlimited | ✅ No company-level bottlenecks |
+| Dimension              | Current                           | Assessment                           |
+| ---------------------- | --------------------------------- | ------------------------------------ |
+| Reviews per company    | Capped at 200 in index            | Could be higher; 200 is conservative |
+| Reviews per issue      | Unbounded history                 | ⚠️ Should cap history per review     |
+| Concurrent submissions | No lock needed (per-issue atomic) | ✅ Scales horizontally               |
+| Plugin instances       | One per company                   | ✅ Stateless design                  |
+| Companies              | Unlimited                         | ✅ No company-level bottlenecks      |
 
 ---
 
@@ -296,6 +306,7 @@ The operations cockpit (reference plugin) is the natural consumer of `quality_ga
 ### 8.3 No formal dependency declaration
 
 From SPEC.md:
+
 > "Declaring dependency in their manifest: no formal dependency system yet — rely on `uos-quality-gate` being installed"
 
 This is a known limitation. If a consuming plugin expects `uos-quality-gate` and it's not installed, calls will silently no-op (SDK returns null/error gracefully). A future improvement would be a manifest-level `dependencies` field.
@@ -307,6 +318,7 @@ This is a known limitation. If a consuming plugin expects `uos-quality-gate` and
 ### ✅ Strengths
 
 **9.1 Clean development scripts:**
+
 ```bash
 npm install
 npm run plugin:typecheck   # TypeScript type check
@@ -322,12 +334,14 @@ npm run plugin:dev          # Watch mode
 ### ⚠️ Concerns
 
 **9.4 Only smoke tests exist (`tests/smoke.test.mjs`).** The 20 tests pass but smoke tests verify high-level behavior, not edge cases. The pure functions in `helpers.ts` deserve dedicated unit tests:
+
 - `evaluateQuality`: test each score boundary (null, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 - `mapTargetStatus`: all categories mapped correctly
 - `buildApproveComment`, `buildRejectComment`, `buildAutoRejectComment`: output format
 - `updateReviewStatus`: history appended correctly
 
 **9.5 No GitHub Actions CI.** The `.github/workflows/` directory exists (from `find` output) but may not have an active CI pipeline configured. Recommend adding:
+
 - `npm run plugin:typecheck` on every PR
 - `npm test` on every PR
 - Build verification before merge
@@ -350,19 +364,19 @@ npm run plugin:dev          # Watch mode
 ✅ Deterministic evaluation (enables snapshot testing)  
 ⚠️ No unit tests for pure functions  
 ⚠️ No integration tests for the full review lifecycle  
-⚠️ No error injection testing  
+⚠️ No error injection testing
 
 ---
 
 ## 11. Documentation Quality
 
-| Document | Quality | Notes |
-|---|---|---|
-| `SPEC.md` | ⭐⭐⭐⭐⭐ | Comprehensive, well-structured. Covers protocol, state model, lifecycle, algorithm, error handling, integration contract. |
-| `README.md` | ⭐⭐⭐⭐ | Clean overview, integration examples, feature list. Development commands present. |
-| `src/types.ts` | ⭐⭐⭐⭐⭐ | Self-documenting types. Every interface has a comment. |
-| `src/helpers.ts` | ⭐⭐⭐ | Functions are readable but inline JSDoc would help. |
-| `src/worker.ts` | ⭐⭐⭐ | Section comments (`// ── Data registrations ──`) help navigation, but individual handler blocks lack high-level description. |
+| Document         | Quality    | Notes                                                                                                                        |
+| ---------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `SPEC.md`        | ⭐⭐⭐⭐⭐ | Comprehensive, well-structured. Covers protocol, state model, lifecycle, algorithm, error handling, integration contract.    |
+| `README.md`      | ⭐⭐⭐⭐   | Clean overview, integration examples, feature list. Development commands present.                                            |
+| `src/types.ts`   | ⭐⭐⭐⭐⭐ | Self-documenting types. Every interface has a comment.                                                                       |
+| `src/helpers.ts` | ⭐⭐⭐     | Functions are readable but inline JSDoc would help.                                                                          |
+| `src/worker.ts`  | ⭐⭐⭐     | Section comments (`// ── Data registrations ──`) help navigation, but individual handler blocks lack high-level description. |
 
 ---
 
@@ -370,38 +384,38 @@ npm run plugin:dev          # Watch mode
 
 ### Priority 1 (Must Fix Before Production)
 
-| # | Issue | File | Fix |
-|---|---|---|---|
+| #    | Issue                                       | File        | Fix                                                                           |
+| ---- | ------------------------------------------- | ----------- | ----------------------------------------------------------------------------- |
 | P1.1 | `agent.run.finished` event listener missing | `worker.ts` | Add event subscription in `plugin.setup()` to auto-trigger quality evaluation |
-| P1.2 | `agent.run.failed` event listener missing | `worker.ts` | Add event subscription to log and skip auto-gate |
+| P1.2 | `agent.run.failed` event listener missing   | `worker.ts` | Add event subscription to log and skip auto-gate                              |
 
 ### Priority 2 (Strongly Recommended)
 
-| # | Issue | File | Fix |
-|---|---|---|---|
-| P2.1 | No unit tests for pure functions | `tests/helpers.test.mjs` | Add boundary tests for `evaluateQuality`, `mapTargetStatus` |
-| P2.2 | Review history unbounded per issue | `helpers.ts` | Cap history array at e.g. 50 entries |
-| P2.3 | `as unknown as` cast | `worker.ts:163` | Replace with typed `ParameterOverrides` or documented single cast |
-| P2.4 | Review ID uses `Date.now()` | `helpers.ts:158` | Use crypto.randomUUID() for collision safety |
+| #    | Issue                              | File                     | Fix                                                               |
+| ---- | ---------------------------------- | ------------------------ | ----------------------------------------------------------------- |
+| P2.1 | No unit tests for pure functions   | `tests/helpers.test.mjs` | Add boundary tests for `evaluateQuality`, `mapTargetStatus`       |
+| P2.2 | Review history unbounded per issue | `helpers.ts`             | Cap history array at e.g. 50 entries                              |
+| P2.3 | `as unknown as` cast               | `worker.ts:163`          | Replace with typed `ParameterOverrides` or documented single cast |
+| P2.4 | Review ID uses `Date.now()`        | `helpers.ts:158`         | Use crypto.randomUUID() for collision safety                      |
 
 ### Priority 3 (Nice to Have)
 
-| # | Issue | File | Fix |
-|---|---|---|---|
-| P3.1 | `worker.ts` at 862 lines | Split into `actions.ts`, `events.ts`, `tools.ts` |
-| P3.2 | GitHub Actions CI not confirmed | `.github/workflows/` | Add `typecheck + test` workflow |
-| P3.3 | No dependency declaration system | — | Coordinate with Paperclip SDK team |
-| P3.4 | Sequential iteration in `quality_gate.reviews` | `worker.ts` | Consider `Promise.all` with concurrency limit |
+| #    | Issue                                          | File                                             | Fix                                           |
+| ---- | ---------------------------------------------- | ------------------------------------------------ | --------------------------------------------- |
+| P3.1 | `worker.ts` at 862 lines                       | Split into `actions.ts`, `events.ts`, `tools.ts` |
+| P3.2 | GitHub Actions CI not confirmed                | `.github/workflows/`                             | Add `typecheck + test` workflow               |
+| P3.3 | No dependency declaration system               | —                                                | Coordinate with Paperclip SDK team            |
+| P3.4 | Sequential iteration in `quality_gate.reviews` | `worker.ts`                                      | Consider `Promise.all` with concurrency limit |
 
 ### Priority 4 (Future Extensions)
 
-| # | Feature | Notes |
-|---|---|---|
-| P4.1 | Quality score auto-extraction from agent run logs | Parse agent output for quality signals |
-| P4.2 | Review reassignment | Allow transferring a review to another reviewer |
-| P4.3 | Bulk approve/reject | Batch operations for queue management |
-| P4.4 | Quality trend analytics | Per-agent, per-team quality score history |
-| P4.5 | Custom quality checks | Allow plugins to register custom evaluation rules |
+| #    | Feature                                           | Notes                                             |
+| ---- | ------------------------------------------------- | ------------------------------------------------- |
+| P4.1 | Quality score auto-extraction from agent run logs | Parse agent output for quality signals            |
+| P4.2 | Review reassignment                               | Allow transferring a review to another reviewer   |
+| P4.3 | Bulk approve/reject                               | Batch operations for queue management             |
+| P4.4 | Quality trend analytics                           | Per-agent, per-team quality score history         |
+| P4.5 | Custom quality checks                             | Allow plugins to register custom evaluation rules |
 
 ---
 
@@ -413,4 +427,4 @@ The project demonstrates good software engineering instincts: pure functions for
 
 ---
 
-*This PRD was generated by Hermes Agent using MiniMax M2.7. Files analyzed from the live repository at `/tmp/uos-quality-gate`.*
+_This PRD was generated by Hermes Agent using MiniMax M2.7. Files analyzed from the live repository at `/tmp/uos-quality-gate`._

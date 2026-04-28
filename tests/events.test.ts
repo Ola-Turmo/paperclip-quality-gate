@@ -4,8 +4,12 @@ import { setupEvents } from "../src/events.ts";
 
 describe("quality gate events", () => {
   it("does not throw when issue.updated payload omits the issue object", async () => {
-    const handlers = new Map<string, (event: unknown) => Promise<void> | void>();
-    const logs: Array<{ message: string; payload: Record<string, unknown> }> = [];
+    const handlers = new Map<
+      string,
+      (event: unknown) => Promise<void> | void
+    >();
+    const logs: Array<{ message: string; payload: Record<string, unknown> }> =
+      [];
 
     const ctx = {
       logger: {
@@ -14,7 +18,10 @@ describe("quality gate events", () => {
         },
       },
       events: {
-        on(eventType: string, handler: (event: unknown) => Promise<void> | void) {
+        on(
+          eventType: string,
+          handler: (event: unknown) => Promise<void> | void,
+        ) {
           handlers.set(eventType, handler);
         },
       },

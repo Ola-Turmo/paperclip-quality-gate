@@ -4,18 +4,18 @@
 
 UOS Quality Gate is organized around a small set of focused modules:
 
-| File | Responsibility |
-|---|---|
-| `src/helpers.ts` | Pure scoring, review builders, markdown builders, telemetry envelope |
-| `src/shared.ts` | Stateful integration helpers for config, review persistence, issue docs, metrics |
-| `src/actions.ts` | Operator-triggered mutations |
-| `src/events.ts` | Host event subscriptions and auto-review wiring |
-| `src/tools.ts` | Agent-facing tool entry points |
-| `src/worker.ts` | Plugin setup, data registration, worker entrypoint |
-| `src/ui/QualityGateDashboard.tsx` | Company-level reviewer queue page |
-| `src/ui/QualityGateDashboardWidget.tsx` | Dashboard widget queue summary |
-| `src/ui/QualityGateTab.tsx` | Reviewer cockpit UI |
-| `src/ui/settings.tsx` | Read-only settings/threshold UI |
+| File                                    | Responsibility                                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------------- |
+| `src/helpers.ts`                        | Pure scoring, review builders, markdown builders, telemetry envelope             |
+| `src/shared.ts`                         | Stateful integration helpers for config, review persistence, issue docs, metrics |
+| `src/actions.ts`                        | Operator-triggered mutations                                                     |
+| `src/events.ts`                         | Host event subscriptions and auto-review wiring                                  |
+| `src/tools.ts`                          | Agent-facing tool entry points                                                   |
+| `src/worker.ts`                         | Plugin setup, data registration, worker entrypoint                               |
+| `src/ui/QualityGateDashboard.tsx`       | Company-level reviewer queue page                                                |
+| `src/ui/QualityGateDashboardWidget.tsx` | Dashboard widget queue summary                                                   |
+| `src/ui/QualityGateTab.tsx`             | Reviewer cockpit UI                                                              |
+| `src/ui/settings.tsx`                   | Read-only settings/threshold UI                                                  |
 
 ## Data flow
 

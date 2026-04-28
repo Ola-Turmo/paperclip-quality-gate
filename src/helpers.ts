@@ -34,7 +34,7 @@ const NEXT_STEP_DOCUMENT_KEY = "quality-gate-next-step";
 export function djb2(str: string): number {
   let hash = 5381;
   for (let index = 0; index < str.length; index += 1) {
-    hash = ((hash << 5) + hash) + str.charCodeAt(index);
+    hash = (hash << 5) + hash + str.charCodeAt(index);
   }
   return Math.abs(hash);
 }
@@ -59,7 +59,10 @@ function stableSerialize(value: unknown): string {
 }
 
 const REDACTION_PATTERNS: Array<[RegExp, string]> = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED PRIVATE KEY]"],
+  [
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----/g,
+    "[REDACTED PRIVATE KEY]",
+  ],
   [/\bBearer\s+[A-Za-z0-9._-]{20,}\b/g, "Bearer [REDACTED]"],
   [/\bsk-[A-Za-z0-9]{20,}\b/g, "[REDACTED API KEY]"],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED GITHUB TOKEN]"],
@@ -76,7 +79,10 @@ export function redactSensitiveText(value: string, maxLength = 1200): string {
   return `${next.slice(0, Math.max(0, maxLength - 14))}… [truncated]`;
 }
 
-function sanitizeOptionalText(value: string | undefined, maxLength = 1200): string | undefined {
+function sanitizeOptionalText(
+  value: string | undefined,
+  maxLength = 1200,
+): string | undefined {
   if (!value?.trim()) return undefined;
   return redactSensitiveText(value.trim(), maxLength);
 }
@@ -87,10 +93,14 @@ export function buildEvidenceHash(value: unknown): string {
 
 function riskLevelWeight(level: RiskLevel): number {
   switch (level) {
-    case "critical": return 4;
-    case "high": return 3;
-    case "medium": return 2;
-    default: return 1;
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    default:
+      return 1;
   }
 }
 
@@ -107,7 +117,8 @@ function deriveRiskFlags(
       id: "missing-score",
       label: "Missing self-score",
       level: "medium",
-      detail: "No self-assessed quality score was provided, so the review requires manual evaluation.",
+      detail:
+        "No self-assessed quality score was provided, so the review requires manual evaluation.",
       source: "score",
     });
   }
@@ -127,7 +138,8 @@ function deriveRiskFlags(
       id: "auto-reject-threshold",
       label: "Below auto-reject threshold",
       level: "critical",
-      detail: "The deliverable score fell below the configured auto-reject threshold.",
+      detail:
+        "The deliverable score fell below the configured auto-reject threshold.",
       source: "score",
     });
   } else if (category === "needs_human_review") {
@@ -135,7 +147,8 @@ function deriveRiskFlags(
       id: "manual-review-range",
       label: "Needs human review",
       level: "high",
-      detail: "The deliverable landed inside the human-review range or triggered a block condition.",
+      detail:
+        "The deliverable landed inside the human-review range or triggered a block condition.",
       source: "score",
     });
   }
@@ -154,7 +167,9 @@ function deriveRiskFlags(
   for (const flag of flags) {
     deduped.set(flag.id, flag);
   }
-  return Array.from(deduped.values()).sort((left, right) => riskLevelWeight(right.level) - riskLevelWeight(left.level));
+  return Array.from(deduped.values()).sort(
+    (left, right) => riskLevelWeight(right.level) - riskLevelWeight(left.level),
+  );
 }
 
 function buildChecks(
@@ -171,9 +186,10 @@ function buildChecks(
       name: "Quality score threshold",
       passed: category === "passed",
       score: decisionScore,
-      details: rawScore !== undefined && rawScore !== null
-        ? `Decision score ${decisionScore}/10 vs pass threshold ${config.minQualityScore}/10.`
-        : "No score was provided by the submitter.",
+      details:
+        rawScore !== undefined && rawScore !== null
+          ? `Decision score ${decisionScore}/10 vs pass threshold ${config.minQualityScore}/10.`
+          : "No score was provided by the submitter.",
     },
     {
       id: "review_window",
@@ -191,25 +207,30 @@ function buildChecks(
       name: "Auto-reject guard",
       passed: category !== "auto_rejected",
       score: decisionScore,
-      details: decisionScore < config.autoRejectBelow
-        ? `Decision score ${decisionScore}/10 is below the auto-reject threshold ${config.autoRejectBelow}/10.`
-        : `Decision score ${decisionScore}/10 cleared the auto-reject threshold ${config.autoRejectBelow}/10.`,
+      details:
+        decisionScore < config.autoRejectBelow
+          ? `Decision score ${decisionScore}/10 is below the auto-reject threshold ${config.autoRejectBelow}/10.`
+          : `Decision score ${decisionScore}/10 cleared the auto-reject threshold ${config.autoRejectBelow}/10.`,
     },
     {
       id: "structured_bonus",
       name: "Structured check bonus",
       passed: bonusPoints > 0,
       score: bonusPoints,
-      details: bonusPoints > 0
-        ? `Custom checks contributed +${bonusPoints} bonus points to the decision score.`
-        : "No bonus points were added by structured checks.",
+      details:
+        bonusPoints > 0
+          ? `Custom checks contributed +${bonusPoints} bonus points to the decision score.`
+          : "No bonus points were added by structured checks.",
     },
   ];
 }
 
-function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): QualityCheck {
+function evaluateCustomCheck(
+  check: CustomCheck,
+  issueData?: IssueMetadata,
+): QualityCheck {
   let passed = false;
-  let details = "";
+  let details: string;
   const labels = issueData?.labels ?? [];
   const title = issueData?.title ?? "";
   const assignee = issueData?.assignee;
@@ -217,7 +238,9 @@ function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): Qua
   switch (check.type) {
     case "label_required": {
       const required = check.value ?? "";
-      passed = labels.some((label) => label.toLowerCase() === required.toLowerCase());
+      passed = labels.some(
+        (label) => label.toLowerCase() === required.toLowerCase(),
+      );
       details = passed
         ? `Required label "${required}" is present.`
         : `Required label "${required}" is missing.`;
@@ -225,7 +248,9 @@ function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): Qua
     }
     case "label_missing": {
       const forbidden = check.value ?? "";
-      passed = !labels.some((label) => label.toLowerCase() === forbidden.toLowerCase());
+      passed = !labels.some(
+        (label) => label.toLowerCase() === forbidden.toLowerCase(),
+      );
       details = passed
         ? `Forbidden label "${forbidden}" is absent.`
         : `Forbidden label "${forbidden}" is present.`;
@@ -237,13 +262,16 @@ function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): Qua
         .map((item) => item.trim().toLowerCase())
         .filter(Boolean);
       const titleLower = title.toLowerCase();
-      const matched = keywords.filter((keyword) => titleLower.includes(keyword));
+      const matched = keywords.filter((keyword) =>
+        titleLower.includes(keyword),
+      );
       passed = keywords.length === 0 || matched.length === keywords.length;
-      details = keywords.length === 0
-        ? "No keywords configured."
-        : passed
-          ? `Title contains all required keywords: ${matched.join(", ")}.`
-          : `Missing keywords: ${keywords.filter((keyword) => !matched.includes(keyword)).join(", ")}.`;
+      details =
+        keywords.length === 0
+          ? "No keywords configured."
+          : passed
+            ? `Title contains all required keywords: ${matched.join(", ")}.`
+            : `Missing keywords: ${keywords.filter((keyword) => !matched.includes(keyword)).join(", ")}.`;
       break;
     }
     case "has_assignee": {
@@ -275,10 +303,14 @@ function buildSummary(
   rawScore: number | undefined,
   bonusPoints: number,
 ): string {
-  const rawSegment = rawScore === undefined || rawScore === null
-    ? "No self-score was provided"
-    : `Input score ${rawScore}/10`;
-  const bonusSegment = bonusPoints > 0 ? `, plus ${bonusPoints} structured-check bonus point(s)` : "";
+  const rawSegment =
+    rawScore === undefined || rawScore === null
+      ? "No self-score was provided"
+      : `Input score ${rawScore}/10`;
+  const bonusSegment =
+    bonusPoints > 0
+      ? `, plus ${bonusPoints} structured-check bonus point(s)`
+      : "";
 
   switch (category) {
     case "auto_rejected":
@@ -301,8 +333,13 @@ export function evaluateQuality(
   issueData?: IssueMetadata,
 ): QualityEvaluation {
   const inputScore = clampScore(score);
-  const customChecks = (config.customChecks ?? []).map((check) => evaluateCustomCheck(check, issueData));
-  const bonusPoints = customChecks.reduce((sum, check) => sum + (check.passed ? check.score : 0), 0);
+  const customChecks = (config.customChecks ?? []).map((check) =>
+    evaluateCustomCheck(check, issueData),
+  );
+  const bonusPoints = customChecks.reduce(
+    (sum, check) => sum + (check.passed ? check.score : 0),
+    0,
+  );
   const decisionScore = clampScore(inputScore + bonusPoints);
 
   let category: QualityCategory;
@@ -329,12 +366,27 @@ export function evaluateQuality(
     category = "needs_human_review";
   }
 
-  const variant = (djb2(`${category}:${decisionScore}:${score ?? "none"}`) % 3) - 1;
+  const variant =
+    (djb2(`${category}:${decisionScore}:${score ?? "none"}`) % 3) - 1;
   const overallScore = clampScore(decisionScore + variant);
-  const baseChecks = buildChecks(decisionScore, category, score, blockApproval, config, bonusPoints);
+  const baseChecks = buildChecks(
+    decisionScore,
+    category,
+    score,
+    blockApproval,
+    config,
+    bonusPoints,
+  );
   const checks = [...baseChecks, ...customChecks];
   const riskFlags = deriveRiskFlags(score, category, checks, blockApproval);
-  const summary = buildSummary(decisionScore, overallScore, category, config, score, bonusPoints);
+  const summary = buildSummary(
+    decisionScore,
+    overallScore,
+    category,
+    config,
+    score,
+    bonusPoints,
+  );
 
   return {
     inputScore,
@@ -377,17 +429,35 @@ export function buildEvidenceBundle(input: {
   const sanitizedComment = sanitizeOptionalText(input.comment, 1200);
 
   if (sanitizedTitle) {
-    inputRefs.push({ id: "title", kind: "issue", label: "Title", value: sanitizedTitle });
+    inputRefs.push({
+      id: "title",
+      kind: "issue",
+      label: "Title",
+      value: sanitizedTitle,
+    });
   }
   if (sanitizedSummary) {
-    inputRefs.push({ id: "summary", kind: "summary", label: "Submitted summary", value: sanitizedSummary });
+    inputRefs.push({
+      id: "summary",
+      kind: "summary",
+      label: "Submitted summary",
+      value: sanitizedSummary,
+    });
   }
   if (sanitizedComment) {
-    inputRefs.push({ id: "comment", kind: "comment", label: "Operator comment", value: sanitizedComment });
+    inputRefs.push({
+      id: "comment",
+      kind: "comment",
+      label: "Operator comment",
+      value: sanitizedComment,
+    });
   }
 
   const retrievedContext: EvidenceRef[] = [];
-  const sanitizedDescription = sanitizeOptionalText(input.issueData?.description, 600);
+  const sanitizedDescription = sanitizeOptionalText(
+    input.issueData?.description,
+    600,
+  );
   if (sanitizedDescription) {
     retrievedContext.push({
       id: "description",
@@ -397,33 +467,78 @@ export function buildEvidenceBundle(input: {
     });
   }
   if (input.issueData?.status) {
-    retrievedContext.push({ id: "status", kind: "trace", label: "Issue status", value: input.issueData.status });
+    retrievedContext.push({
+      id: "status",
+      kind: "trace",
+      label: "Issue status",
+      value: input.issueData.status,
+    });
   }
   if (input.issueData?.labels?.length) {
-    retrievedContext.push({ id: "labels", kind: "trace", label: "Labels", value: input.issueData.labels.join(", ") });
+    retrievedContext.push({
+      id: "labels",
+      kind: "trace",
+      label: "Labels",
+      value: input.issueData.labels.join(", "),
+    });
   }
   if (input.issueData?.assignee) {
-    retrievedContext.push({ id: "assignee", kind: "trace", label: "Assignee", value: input.issueData.assignee });
+    retrievedContext.push({
+      id: "assignee",
+      kind: "trace",
+      label: "Assignee",
+      value: input.issueData.assignee,
+    });
   }
   for (const flag of input.riskFlags.slice(0, 6)) {
-    retrievedContext.push({ id: flag.id, kind: "trace", label: `Risk · ${flag.label}`, value: flag.detail });
+    retrievedContext.push({
+      id: flag.id,
+      kind: "trace",
+      label: `Risk · ${flag.label}`,
+      value: flag.detail,
+    });
   }
 
   const trace: TraceStep[] = [
-    { label: "Trigger", value: `${input.trigger.source} by ${input.trigger.actorLabel}`, emphasis: "observed" },
+    {
+      label: "Trigger",
+      value: `${input.trigger.source} by ${input.trigger.actorLabel}`,
+      emphasis: "observed",
+    },
     { label: "Issue", value: input.issueId, emphasis: "observed" },
-    { label: "Check count", value: `${input.checks.length}`, emphasis: "decision" },
-    { label: "Risk count", value: `${input.riskFlags.length}`, emphasis: "decision" },
+    {
+      label: "Check count",
+      value: `${input.checks.length}`,
+      emphasis: "decision",
+    },
+    {
+      label: "Risk count",
+      value: `${input.riskFlags.length}`,
+      emphasis: "decision",
+    },
   ];
   if (input.trigger.runId) {
-    trace.push({ label: "Run ID", value: input.trigger.runId, emphasis: "observed" });
+    trace.push({
+      label: "Run ID",
+      value: input.trigger.runId,
+      emphasis: "observed",
+    });
   }
   if (input.trigger.agentId) {
-    trace.push({ label: "Agent", value: input.trigger.agentId, emphasis: "observed" });
+    trace.push({
+      label: "Agent",
+      value: input.trigger.agentId,
+      emphasis: "observed",
+    });
   }
 
   const standards = buildDefaultStandards();
-  const hash = buildEvidenceHash({ inputRefs, retrievedContext, standards, trace });
+  const hash = buildEvidenceHash({
+    inputRefs,
+    retrievedContext,
+    standards,
+    trace,
+  });
 
   return {
     inputRefs,
@@ -442,51 +557,78 @@ export function buildDraftArtifact(input: {
   evaluation: QualityEvaluation;
   revision: number;
 }): DraftArtifact {
-  const title = sanitizeOptionalText(input.issueData?.title, 180) || `Deliverable review for ${input.issueId}`;
+  const title =
+    sanitizeOptionalText(input.issueData?.title, 180) ||
+    `Deliverable review for ${input.issueId}`;
   const sanitizedSummary = sanitizeOptionalText(input.summary, 1600);
-  const sanitizedDescription = sanitizeOptionalText(input.issueData?.description, 1600);
+  const sanitizedDescription = sanitizeOptionalText(
+    input.issueData?.description,
+    1600,
+  );
   const body = [
     sanitizedSummary ? `### Submitted output\n${sanitizedSummary}` : undefined,
-    sanitizedDescription ? `### Source brief\n${sanitizedDescription}` : undefined,
+    sanitizedDescription
+      ? `### Source brief\n${sanitizedDescription}`
+      : undefined,
     `### Evaluation summary\n${input.evaluation.summary}`,
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const riskLabels = input.evaluation.riskFlags.map((flag) => flag.label);
-  const confidence = Math.max(0, Math.min(100, Math.round((input.evaluation.overallScore / 10) * 100 - (riskLabels.length * 6))));
+  const confidence = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        (input.evaluation.overallScore / 10) * 100 - riskLabels.length * 6,
+      ),
+    ),
+  );
 
   return {
     artifactType: "deliverable_summary",
     title,
-    bodyMd: body || "No draft body was supplied. Review the linked issue context and evidence bundle.",
+    bodyMd:
+      body ||
+      "No draft body was supplied. Review the linked issue context and evidence bundle.",
     confidence,
     revision: input.revision,
     riskLabels,
   };
 }
 
-export function buildReviewSummary(review: Pick<DeliverableReview, "status" | "category" | "draftArtifact" | "riskFlags" | "releaseDecision">): ReviewSummary {
-  const riskHeadline = review.riskFlags.length > 0
-    ? `${review.riskFlags[0].label}${review.riskFlags.length > 1 ? ` +${review.riskFlags.length - 1} more` : ""}`
-    : "No active risks flagged";
+export function buildReviewSummary(
+  review: Pick<
+    DeliverableReview,
+    "status" | "category" | "draftArtifact" | "riskFlags" | "releaseDecision"
+  >,
+): ReviewSummary {
+  const riskHeadline =
+    review.riskFlags.length > 0
+      ? `${review.riskFlags[0].label}${review.riskFlags.length > 1 ? ` +${review.riskFlags.length - 1} more` : ""}`
+      : "No active risks flagged";
 
-  const disposition = review.releaseDecision.approvalState === "released"
-    ? "Released"
-    : review.releaseDecision.approvalState === "approved_hold"
-      ? "Approved and held"
-      : review.status === "escalated"
-        ? "Escalated"
-        : review.status === "rejected" || review.status === "auto_rejected"
-          ? "Needs revision"
-          : "Awaiting reviewer action";
-
-  const reviewerHint = review.status === "auto_rejected"
-    ? "Revise the output before another submission."
-    : review.status === "needs_human_review"
-      ? "Inspect the evidence bundle, draft artifact, and risk cards before deciding."
+  const disposition =
+    review.releaseDecision.approvalState === "released"
+      ? "Released"
       : review.releaseDecision.approvalState === "approved_hold"
-        ? "Work is approved but still held. Release when downstream delivery is safe."
-        : review.releaseDecision.approvalState === "released"
-          ? "The package has been released and the audit trail is complete."
-          : "Review the evidence package and choose the next operator action.";
+        ? "Approved and held"
+        : review.status === "escalated"
+          ? "Escalated"
+          : review.status === "rejected" || review.status === "auto_rejected"
+            ? "Needs revision"
+            : "Awaiting reviewer action";
+
+  const reviewerHint =
+    review.status === "auto_rejected"
+      ? "Revise the output before another submission."
+      : review.status === "needs_human_review"
+        ? "Inspect the evidence bundle, draft artifact, and risk cards before deciding."
+        : review.releaseDecision.approvalState === "approved_hold"
+          ? "Work is approved but still held. Release when downstream delivery is safe."
+          : review.releaseDecision.approvalState === "released"
+            ? "The package has been released and the audit trail is complete."
+            : "Review the evidence package and choose the next operator action.";
 
   return {
     headline: `${review.draftArtifact.title} · ${riskHeadline}`,
@@ -495,7 +637,9 @@ export function buildReviewSummary(review: Pick<DeliverableReview, "status" | "c
   };
 }
 
-function buildReleaseDecision(state: ReleaseDecision["approvalState"] = "pending"): ReleaseDecision {
+function buildReleaseDecision(
+  state: ReleaseDecision["approvalState"] = "pending",
+): ReleaseDecision {
   return { approvalState: state };
 }
 
@@ -507,19 +651,30 @@ function buildHandoffTask(): DeliverableReview["handoffTask"] {
   };
 }
 
-export function buildNextStepTemplate(review: DeliverableReview, goal: "revision" | "follow_up" | "release" = "revision"): string {
-  const headline = goal === "release"
-    ? "Release checklist"
-    : goal === "follow_up"
-      ? "Follow-up instruction"
-      : "Revision brief";
-  const riskLines = review.riskFlags.length > 0
-    ? review.riskFlags.map((flag) => `- [${flag.level}] ${flag.label}: ${flag.detail}`).join("\n")
-    : "- No active risk flags.";
-  const checkLines = review.checks
-    .filter((check) => !check.passed)
-    .map((check) => `- ${check.name}: ${check.details ?? "Review the failed check."}`)
-    .join("\n") || "- No failing checks were recorded.";
+export function buildNextStepTemplate(
+  review: DeliverableReview,
+  goal: "revision" | "follow_up" | "release" = "revision",
+): string {
+  const headline =
+    goal === "release"
+      ? "Release checklist"
+      : goal === "follow_up"
+        ? "Follow-up instruction"
+        : "Revision brief";
+  const riskLines =
+    review.riskFlags.length > 0
+      ? review.riskFlags
+          .map((flag) => `- [${flag.level}] ${flag.label}: ${flag.detail}`)
+          .join("\n")
+      : "- No active risk flags.";
+  const checkLines =
+    review.checks
+      .filter((check) => !check.passed)
+      .map(
+        (check) =>
+          `- ${check.name}: ${check.details ?? "Review the failed check."}`,
+      )
+      .join("\n") || "- No failing checks were recorded.";
 
   return [
     `# ${headline}`,
@@ -563,24 +718,36 @@ export function buildEvidenceMarkdown(review: DeliverableReview): string {
     review.draftArtifact.bodyMd,
     "",
     "## Input references",
-    ...review.evidenceBundle.inputRefs.map((ref) => `- **${ref.label}** (${ref.kind}): ${ref.value}`),
+    ...review.evidenceBundle.inputRefs.map(
+      (ref) => `- **${ref.label}** (${ref.kind}): ${ref.value}`,
+    ),
     "",
     "## Retrieved context",
-    ...review.evidenceBundle.retrievedContext.map((ref) => `- **${ref.label}** (${ref.kind}): ${ref.value}`),
+    ...review.evidenceBundle.retrievedContext.map(
+      (ref) => `- **${ref.label}** (${ref.kind}): ${ref.value}`,
+    ),
     "",
     "## Standards invoked",
     ...review.evidenceBundle.standards.map((standard) => `- ${standard}`),
     "",
     "## Trace",
-    ...review.evidenceBundle.trace.map((step) => `- ${step.label}: ${step.value}`),
+    ...review.evidenceBundle.trace.map(
+      (step) => `- ${step.label}: ${step.value}`,
+    ),
     "",
     "## Risks",
     ...(review.riskFlags.length > 0
-      ? review.riskFlags.map((flag) => `- **${flag.level.toUpperCase()}** ${flag.label}: ${flag.detail}`)
+      ? review.riskFlags.map(
+          (flag) =>
+            `- **${flag.level.toUpperCase()}** ${flag.label}: ${flag.detail}`,
+        )
       : ["- No active risk flags."]),
     "",
     "## Checks",
-    ...review.checks.map((check) => `- ${check.passed ? "✅" : "❌"} **${check.name}** — ${check.details ?? "No details"} (score ${check.score})`),
+    ...review.checks.map(
+      (check) =>
+        `- ${check.passed ? "✅" : "❌"} **${check.name}** — ${check.details ?? "No details"} (score ${check.score})`,
+    ),
   ];
 
   return sections.join("\n");
@@ -592,7 +759,8 @@ export function buildNextStepMarkdown(review: DeliverableReview): string {
 
 function deriveInitialStatus(evaluation: QualityEvaluation): ReviewStatus {
   if (evaluation.autoRejected) return "auto_rejected";
-  if (evaluation.blockThresholdBreached || evaluation.category === "none") return "needs_human_review";
+  if (evaluation.blockThresholdBreached || evaluation.category === "none")
+    return "needs_human_review";
   return "pending_review";
 }
 
@@ -677,7 +845,9 @@ export function updateReviewStatus(
   patch: Partial<DeliverableReview> = {},
 ): DeliverableReview {
   const now = new Date().toISOString();
-  const nextHistory = [...review.history, { ...action, createdAt: now }].slice(-MAX_HISTORY_ENTRIES);
+  const nextHistory = [...review.history, { ...action, createdAt: now }].slice(
+    -MAX_HISTORY_ENTRIES,
+  );
   const nextReleaseDecision = patch.releaseDecision ?? review.releaseDecision;
   const nextHandoffTask = patch.handoffTask ?? review.handoffTask;
 
@@ -691,20 +861,25 @@ export function updateReviewStatus(
     updatedAt: now,
   };
   next.reviewSummary = buildReviewSummary(next);
-  next.nextStepTemplate = patch.nextStepTemplate ?? (review.nextStepTemplate || buildNextStepTemplate(next));
+  next.nextStepTemplate =
+    patch.nextStepTemplate ??
+    (review.nextStepTemplate || buildNextStepTemplate(next));
   return next;
 }
 
-export function applyEvaluationToReview(review: DeliverableReview, input: {
-  summary?: string;
-  comment?: string;
-  evaluation: QualityEvaluation;
-  trigger: ReviewTrigger;
-  issueData?: IssueMetadata;
-  reviewerName: string;
-  agentId?: string;
-  blockApproval?: boolean;
-}): DeliverableReview {
+export function applyEvaluationToReview(
+  review: DeliverableReview,
+  input: {
+    summary?: string;
+    comment?: string;
+    evaluation: QualityEvaluation;
+    trigger: ReviewTrigger;
+    issueData?: IssueMetadata;
+    reviewerName: string;
+    agentId?: string;
+    blockApproval?: boolean;
+  },
+): DeliverableReview {
   const revision = review.draftArtifact.revision + 1;
   const draftArtifact = buildDraftArtifact({
     issueId: review.issueId,
@@ -761,14 +936,19 @@ export function assignReview(
   assignedTo: string,
   reviewerName: string,
 ): DeliverableReview {
-  return updateReviewStatus(review, review.status, {
-    action: "assigned",
-    reviewer: "user",
-    reviewerName,
-    comment: `Assigned to ${assignedTo}`,
-  }, {
-    assignedTo,
-  });
+  return updateReviewStatus(
+    review,
+    review.status,
+    {
+      action: "assigned",
+      reviewer: "user",
+      reviewerName,
+      comment: `Assigned to ${assignedTo}`,
+    },
+    {
+      assignedTo,
+    },
+  );
 }
 
 export function buildSubmitComment(review: DeliverableReview): string {
@@ -798,7 +978,9 @@ export function buildApproveHoldComment(comment?: string): string {
     comment ? `\n> ${redactSensitiveText(comment, 600)}` : undefined,
     "",
     "_Use Approve & Release when the destination or next action is ready._",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildApproveComment(comment?: string): string {
@@ -809,7 +991,9 @@ export function buildApproveComment(comment?: string): string {
     comment ? `\n> ${redactSensitiveText(comment, 600)}` : undefined,
     "",
     "_Audit trail updated._",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildRejectComment(comment: string): string {
@@ -824,7 +1008,10 @@ export function buildRejectComment(comment: string): string {
   ].join("\n");
 }
 
-export function buildReturnToAgentComment(instruction: string, targetAgentId?: string): string {
+export function buildReturnToAgentComment(
+  instruction: string,
+  targetAgentId?: string,
+): string {
   const mention = targetAgentId ? `@${targetAgentId} ` : "";
   return [
     "## ↩️ Quality Gate — Returned to Agent",
@@ -835,17 +1022,25 @@ export function buildReturnToAgentComment(instruction: string, targetAgentId?: s
   ].join("\n");
 }
 
-export function buildEscalateComment(comment: string, escalateTo?: string): string {
+export function buildEscalateComment(
+  comment: string,
+  escalateTo?: string,
+): string {
   return [
     "## 🛡️ Quality Gate — Escalated",
     "",
-    escalateTo ? `Escalated to **${escalateTo}** for higher-scope review.` : "Escalated for higher-scope review.",
+    escalateTo
+      ? `Escalated to **${escalateTo}** for higher-scope review.`
+      : "Escalated for higher-scope review.",
     "",
     `> ${redactSensitiveText(comment, 900)}`,
   ].join("\n");
 }
 
-export function buildAutoRejectComment(score: number, autoRejectBelow: number): string {
+export function buildAutoRejectComment(
+  score: number,
+  autoRejectBelow: number,
+): string {
   return [
     "## ⚠️ Quality Gate — Auto-Rejected",
     "",
@@ -872,7 +1067,10 @@ export function mapTargetStatus(category: QualityCategory): string | null {
   }
 }
 
-export function buildTelemetryEnvelope(review: DeliverableReview, decisionType: string): Record<string, string | number | boolean> {
+export function buildTelemetryEnvelope(
+  review: DeliverableReview,
+  decisionType: string,
+): Record<string, string | number | boolean> {
   return {
     company_id: review.companyId,
     issue_id: review.issueId,
@@ -882,14 +1080,22 @@ export function buildTelemetryEnvelope(review: DeliverableReview, decisionType: 
     category: review.category,
     display_score: review.qualityScore,
     decision_score: review.decisionScore,
-    review_required: review.status === "needs_human_review" || review.status === "pending_review",
+    review_required:
+      review.status === "needs_human_review" ||
+      review.status === "pending_review",
     risk_count: review.riskFlags.length,
     released: review.releaseDecision.approvalState === "released",
   };
 }
 
-export function buildReviewQueueData(records: ReviewStatusData[]): ReviewQueueData {
-  const sorted = [...records].sort((left, right) => new Date(right.review.updatedAt).getTime() - new Date(left.review.updatedAt).getTime());
+export function buildReviewQueueData(
+  records: ReviewStatusData[],
+): ReviewQueueData {
+  const sorted = [...records].sort(
+    (left, right) =>
+      new Date(right.review.updatedAt).getTime() -
+      new Date(left.review.updatedAt).getTime(),
+  );
   const items: ReviewQueueItem[] = sorted.map(({ review, issue }) => ({
     reviewId: review.id,
     issueId: review.issueId,
@@ -905,14 +1111,40 @@ export function buildReviewQueueData(records: ReviewStatusData[]): ReviewQueueDa
     topRiskLevel: review.riskFlags[0]?.level,
   }));
 
-  const totalDecisionScore = items.reduce((sum, item) => sum + item.decisionScore, 0);
-  const pendingReviews = items.filter((item) => (item.status === "pending_review" || item.status === "needs_human_review") && item.approvalState === "pending").length;
-  const approvedHoldReviews = items.filter((item) => item.approvalState === "approved_hold").length;
-  const releasedReviews = items.filter((item) => item.approvalState === "released").length;
-  const escalatedReviews = items.filter((item) => item.status === "escalated" || item.approvalState === "escalated").length;
-  const revisionQueueReviews = items.filter((item) => item.status === "rejected" || item.status === "auto_rejected").length;
-  const highRiskReviews = sorted.filter(({ review }) => review.riskFlags.some((flag) => flag.level === "high" || flag.level === "critical")).length;
-  const unassignedPendingReviews = items.filter((item) => (item.status === "pending_review" || item.status === "needs_human_review") && item.approvalState === "pending" && !item.assignedTo?.trim()).length;
+  const totalDecisionScore = items.reduce(
+    (sum, item) => sum + item.decisionScore,
+    0,
+  );
+  const pendingReviews = items.filter(
+    (item) =>
+      (item.status === "pending_review" ||
+        item.status === "needs_human_review") &&
+      item.approvalState === "pending",
+  ).length;
+  const approvedHoldReviews = items.filter(
+    (item) => item.approvalState === "approved_hold",
+  ).length;
+  const releasedReviews = items.filter(
+    (item) => item.approvalState === "released",
+  ).length;
+  const escalatedReviews = items.filter(
+    (item) => item.status === "escalated" || item.approvalState === "escalated",
+  ).length;
+  const revisionQueueReviews = items.filter(
+    (item) => item.status === "rejected" || item.status === "auto_rejected",
+  ).length;
+  const highRiskReviews = sorted.filter(({ review }) =>
+    review.riskFlags.some(
+      (flag) => flag.level === "high" || flag.level === "critical",
+    ),
+  ).length;
+  const unassignedPendingReviews = items.filter(
+    (item) =>
+      (item.status === "pending_review" ||
+        item.status === "needs_human_review") &&
+      item.approvalState === "pending" &&
+      !item.assignedTo?.trim(),
+  ).length;
 
   return {
     items,
@@ -925,7 +1157,10 @@ export function buildReviewQueueData(records: ReviewStatusData[]): ReviewQueueDa
       revisionQueueReviews,
       highRiskReviews,
       unassignedPendingReviews,
-      averageDecisionScore: items.length > 0 ? Math.round((totalDecisionScore / items.length) * 10) / 10 : 0,
+      averageDecisionScore:
+        items.length > 0
+          ? Math.round((totalDecisionScore / items.length) * 10) / 10
+          : 0,
     },
   };
 }

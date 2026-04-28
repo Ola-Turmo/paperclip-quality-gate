@@ -13,10 +13,22 @@ import { DEFAULT_CONFIG } from "../src/manifest.js";
 
 describe("comment builders", () => {
   it("creates reviewer-facing approval and release comments", () => {
-    assert.match(buildApproveHoldComment("Looks good, hold for final send."), /Approved \(Held\)/);
+    assert.match(
+      buildApproveHoldComment("Looks good, hold for final send."),
+      /Approved \(Held\)/,
+    );
     assert.match(buildApproveComment("Ship it."), /Approved & Released/);
-    assert.match(buildRejectComment("Missing evidence for compliance."), /Revision Requested/);
-    assert.match(buildReturnToAgentComment("Please address the compliance gaps.", "agent-123"), /@agent-123/);
+    assert.match(
+      buildRejectComment("Missing evidence for compliance."),
+      /Revision Requested/,
+    );
+    assert.match(
+      buildReturnToAgentComment(
+        "Please address the compliance gaps.",
+        "agent-123",
+      ),
+      /@agent-123/,
+    );
   });
 });
 
@@ -44,10 +56,11 @@ describe("telemetry envelope", () => {
   });
 });
 
-
 describe("comment sanitization", () => {
   it("redacts obvious secrets in reviewer-facing comments", () => {
-    const comment = buildApproveComment("Ship with sk-123456789012345678901234 hidden.");
+    const comment = buildApproveComment(
+      "Ship with sk-123456789012345678901234 hidden.",
+    );
     assert.match(comment, /\[REDACTED API KEY\]/);
   });
 });

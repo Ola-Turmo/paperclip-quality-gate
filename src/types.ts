@@ -50,7 +50,15 @@ export interface RiskFlag {
 
 export interface EvidenceRef {
   id: string;
-  kind: "issue" | "summary" | "comment" | "check" | "standard" | "trace" | "instruction" | "document";
+  kind:
+    | "issue"
+    | "summary"
+    | "comment"
+    | "check"
+    | "standard"
+    | "trace"
+    | "instruction"
+    | "document";
   label: string;
   value: string;
 }
@@ -80,7 +88,11 @@ export interface DraftArtifact {
 }
 
 export interface ReviewTrigger {
-  source: "manual_submit" | "agent_run_finished" | "tool_submit" | "resubmission";
+  source:
+    | "manual_submit"
+    | "agent_run_finished"
+    | "tool_submit"
+    | "resubmission";
   actorLabel: string;
   agentId?: string;
   runId?: string;
@@ -89,7 +101,12 @@ export interface ReviewTrigger {
 }
 
 export interface ReleaseDecision {
-  approvalState: "pending" | "approved_hold" | "released" | "rejected" | "escalated";
+  approvalState:
+    | "pending"
+    | "approved_hold"
+    | "released"
+    | "rejected"
+    | "escalated";
   approvedBy?: string;
   releasedBy?: string;
   releasedAt?: string;
@@ -98,7 +115,13 @@ export interface ReleaseDecision {
 export interface HandoffTask {
   targetAgentId?: string;
   instructionMd: string;
-  status: "idle" | "queued" | "returned_to_agent" | "awaiting_agent" | "resolved" | "escalated";
+  status:
+    | "idle"
+    | "queued"
+    | "returned_to_agent"
+    | "awaiting_agent"
+    | "resolved"
+    | "escalated";
   linkedIssueId?: string;
   updatedAt: string;
 }

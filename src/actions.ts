@@ -30,7 +30,15 @@ import {
   mapTargetStatus,
   updateReviewStatus,
 } from "./helpers.js";
-import { castParams, emitObservability, getConfig, getIssueSnapshot, getReview, persistReviewArtifacts, putReview } from "./shared.js";
+import {
+  castParams,
+  emitObservability,
+  getConfig,
+  getIssueSnapshot,
+  getReview,
+  persistReviewArtifacts,
+  putReview,
+} from "./shared.js";
 
 async function syncIssueStatus(
   ctx: PluginContext,
@@ -66,7 +74,11 @@ async function postIssueComment(
   }
 }
 
-async function logActivity(ctx: PluginContext, review: DeliverableReview, message: string): Promise<void> {
+async function logActivity(
+  ctx: PluginContext,
+  review: DeliverableReview,
+  message: string,
+): Promise<void> {
   if (!review.companyId) return;
   try {
     await ctx.activity.log({
@@ -92,8 +104,17 @@ async function finalizeReviewUpdate(
   await persistReviewArtifacts(ctx, review);
   await syncIssueStatus(ctx, review.issueId, review.companyId, issueStatus);
   await postIssueComment(ctx, review, commentBody);
-  await logActivity(ctx, review, `${lifecycleEvent} for issue ${review.issueId}`);
-  await emitObservability(ctx, lifecycleEvent, review, buildTelemetryEnvelope(review, lifecycleEvent));
+  await logActivity(
+    ctx,
+    review,
+    `${lifecycleEvent} for issue ${review.issueId}`,
+  );
+  await emitObservability(
+    ctx,
+    lifecycleEvent,
+    review,
+    buildTelemetryEnvelope(review, lifecycleEvent),
+  );
   ctx.streams.emit("quality_gate.review_updated", { review });
   if (streamEvent) {
     ctx.streams.emit(streamEvent, { review });
@@ -113,7 +134,12 @@ async function handleSubmit(
   try {
     const config = await getConfig(ctx);
     const { issueData, companyId } = await getIssueSnapshot(ctx, p.issue_id);
-    const evaluation = evaluateQuality(p.quality_score, p.block_approval ?? false, config, issueData);
+    const evaluation = evaluateQuality(
+      p.quality_score,
+      p.block_approval ?? false,
+      config,
+      issueData,
+    );
     const existingReview = await getReview(ctx, p.issue_id);
 
     const review = existingReview
@@ -166,7 +192,10 @@ async function handleSubmit(
         score: review.decisionScore,
         reason: "auto_rejected",
       });
-    } else if (evaluation.blockThresholdBreached || evaluation.category === "none") {
+    } else if (
+      evaluation.blockThresholdBreached ||
+      evaluation.category === "none"
+    ) {
       ctx.streams.emit("quality_gate.threshold_breached", {
         review,
         score: review.decisionScore,
@@ -177,7 +206,10 @@ async function handleSubmit(
     return response;
   } catch (error) {
     ctx.logger.warn("quality_gate.submit failed", { error: String(error) });
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -191,17 +223,22 @@ async function handleApproveHold(
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
 
-  const updated = updateReviewStatus(review, "approved", {
-    action: "approved_hold",
-    reviewer: "user",
-    reviewerName: "Reviewer",
-    comment: p.comment,
-  }, {
-    releaseDecision: {
-      approvalState: "approved_hold",
-      approvedBy: "Reviewer",
+  const updated = updateReviewStatus(
+    review,
+    "approved",
+    {
+      action: "approved_hold",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+      comment: p.comment,
     },
-  });
+    {
+      releaseDecision: {
+        approvalState: "approved_hold",
+        approvedBy: "Reviewer",
+      },
+    },
+  );
   updated.nextStepTemplate = buildNextStepTemplate(updated, "release");
 
   return finalizeReviewUpdate(
@@ -223,19 +260,30 @@ async function handleApprove(
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
 
-  const updated = updateReviewStatus(review, "approved", {
-    action: review.releaseDecision.approvalState === "approved_hold" ? "released" : "approved_and_released",
-    reviewer: "user",
-    reviewerName: "Reviewer",
-    comment: p.comment,
-  }, {
-    releaseDecision: {
-      approvalState: "released",
-      approvedBy: review.releaseDecision.approvalState === "approved_hold" ? review.releaseDecision.approvedBy ?? "Reviewer" : "Reviewer",
-      releasedBy: "Reviewer",
-      releasedAt: new Date().toISOString(),
+  const updated = updateReviewStatus(
+    review,
+    "approved",
+    {
+      action:
+        review.releaseDecision.approvalState === "approved_hold"
+          ? "released"
+          : "approved_and_released",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+      comment: p.comment,
     },
-  });
+    {
+      releaseDecision: {
+        approvalState: "released",
+        approvedBy:
+          review.releaseDecision.approvalState === "approved_hold"
+            ? (review.releaseDecision.approvedBy ?? "Reviewer")
+            : "Reviewer",
+        releasedBy: "Reviewer",
+        releasedAt: new Date().toISOString(),
+      },
+    },
+  );
   updated.nextStepTemplate = buildNextStepTemplate(updated, "follow_up");
 
   return finalizeReviewUpdate(
@@ -254,29 +302,35 @@ async function handleReject(
 ): Promise<ActionResult<DeliverableReview>> {
   const p = castParams<RejectParams>(params);
   if (!p.issue_id) return { ok: false, error: "issue_id is required" };
-  if (!p.comment?.trim()) return { ok: false, error: "comment is required when requesting revision" };
+  if (!p.comment?.trim())
+    return { ok: false, error: "comment is required when requesting revision" };
 
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
 
-  const updated = updateReviewStatus(review, "rejected", {
-    action: "revision_requested",
-    reviewer: "user",
-    reviewerName: "Reviewer",
-    comment: p.comment,
-  }, {
-    category: "rejected",
-    releaseDecision: {
-      approvalState: "rejected",
-      approvedBy: review.releaseDecision.approvedBy,
+  const updated = updateReviewStatus(
+    review,
+    "rejected",
+    {
+      action: "revision_requested",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+      comment: p.comment,
     },
-    handoffTask: {
-      ...review.handoffTask,
-      instructionMd: p.comment,
-      status: "queued",
-      updatedAt: new Date().toISOString(),
+    {
+      category: "rejected",
+      releaseDecision: {
+        approvalState: "rejected",
+        approvedBy: review.releaseDecision.approvedBy,
+      },
+      handoffTask: {
+        ...review.handoffTask,
+        instructionMd: p.comment,
+        status: "queued",
+        updatedAt: new Date().toISOString(),
+      },
     },
-  });
+  );
   updated.nextStepTemplate = buildNextStepTemplate(updated, "revision");
 
   return finalizeReviewUpdate(
@@ -295,7 +349,8 @@ async function handleAssign(
 ): Promise<ActionResult<DeliverableReview>> {
   const p = castParams<AssignParams>(params);
   if (!p.issue_id) return { ok: false, error: "issue_id is required" };
-  if (!p.assigned_to?.trim()) return { ok: false, error: "assigned_to is required" };
+  if (!p.assigned_to?.trim())
+    return { ok: false, error: "assigned_to is required" };
 
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
@@ -317,29 +372,35 @@ async function handleReturnToAgent(
 ): Promise<ActionResult<DeliverableReview>> {
   const p = castParams<ReturnToAgentParams>(params);
   if (!p.issue_id) return { ok: false, error: "issue_id is required" };
-  if (!p.instruction?.trim()) return { ok: false, error: "instruction is required" };
+  if (!p.instruction?.trim())
+    return { ok: false, error: "instruction is required" };
 
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
 
-  const updated = updateReviewStatus(review, "rejected", {
-    action: "returned_to_agent",
-    reviewer: "user",
-    reviewerName: "Reviewer",
-    comment: p.instruction,
-  }, {
-    category: "rejected",
-    handoffTask: {
-      targetAgentId: p.target_agent_id,
-      instructionMd: p.instruction,
-      status: "returned_to_agent",
-      updatedAt: new Date().toISOString(),
+  const updated = updateReviewStatus(
+    review,
+    "rejected",
+    {
+      action: "returned_to_agent",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+      comment: p.instruction,
     },
-    releaseDecision: {
-      approvalState: "rejected",
-      approvedBy: review.releaseDecision.approvedBy,
+    {
+      category: "rejected",
+      handoffTask: {
+        targetAgentId: p.target_agent_id,
+        instructionMd: p.instruction,
+        status: "returned_to_agent",
+        updatedAt: new Date().toISOString(),
+      },
+      releaseDecision: {
+        approvalState: "rejected",
+        approvedBy: review.releaseDecision.approvedBy,
+      },
     },
-  });
+  );
   updated.nextStepTemplate = buildNextStepTemplate(updated, "revision");
 
   return finalizeReviewUpdate(
@@ -362,25 +423,30 @@ async function handleEscalate(
   const review = await getReview(ctx, p.issue_id);
   if (!review) return { ok: false, error: "No review found for this issue" };
 
-  const updated = updateReviewStatus(review, "escalated", {
-    action: "escalated",
-    reviewer: "user",
-    reviewerName: "Reviewer",
-    comment: p.comment,
-  }, {
-    category: "escalated",
-    assignedTo: p.escalate_to?.trim() || review.assignedTo,
-    releaseDecision: {
-      approvalState: "escalated",
-      approvedBy: review.releaseDecision.approvedBy,
+  const updated = updateReviewStatus(
+    review,
+    "escalated",
+    {
+      action: "escalated",
+      reviewer: "user",
+      reviewerName: "Reviewer",
+      comment: p.comment,
     },
-    handoffTask: {
-      ...review.handoffTask,
-      instructionMd: p.comment,
-      status: "escalated",
-      updatedAt: new Date().toISOString(),
+    {
+      category: "escalated",
+      assignedTo: p.escalate_to?.trim() || review.assignedTo,
+      releaseDecision: {
+        approvalState: "escalated",
+        approvedBy: review.releaseDecision.approvedBy,
+      },
+      handoffTask: {
+        ...review.handoffTask,
+        instructionMd: p.comment,
+        status: "escalated",
+        updatedAt: new Date().toISOString(),
+      },
     },
-  });
+  );
   updated.nextStepTemplate = buildNextStepTemplate(updated, "follow_up");
 
   return finalizeReviewUpdate(
@@ -403,15 +469,20 @@ async function handleGenerateNextStep(
   if (!review) return { ok: false, error: "No review found for this issue" };
 
   const template = buildNextStepTemplate(review, p.goal ?? "revision");
-  const updated = updateReviewStatus(review, review.status, {
-    action: "next_step_generated",
-    reviewer: "system",
-    reviewerName: "Quality Gate",
-    comment: p.goal ?? "revision",
-    auto: true,
-  }, {
-    nextStepTemplate: template,
-  });
+  const updated = updateReviewStatus(
+    review,
+    review.status,
+    {
+      action: "next_step_generated",
+      reviewer: "system",
+      reviewerName: "Quality Gate",
+      comment: p.goal ?? "revision",
+      auto: true,
+    },
+    {
+      nextStepTemplate: template,
+    },
+  );
 
   const result = await finalizeReviewUpdate(
     ctx,
@@ -433,7 +504,10 @@ interface BulkResultItem {
 async function processBulk(
   ctx: PluginContext,
   issueIds: string[],
-  fn: (ctx: PluginContext, params: Record<string, unknown>) => Promise<ActionResult<DeliverableReview>>,
+  fn: (
+    ctx: PluginContext,
+    params: Record<string, unknown>,
+  ) => Promise<ActionResult<DeliverableReview>>,
   extraParams: Record<string, unknown> = {},
 ): Promise<{ succeeded: string[]; failed: BulkResultItem[] }> {
   const succeeded: string[] = [];
@@ -451,7 +525,12 @@ async function processBulk(
 
     for (const { issueId, result } of results) {
       if (result.ok) succeeded.push(issueId);
-      else failed.push({ issueId, ok: false, error: result.error ?? "Unknown error" });
+      else
+        failed.push({
+          issueId,
+          ok: false,
+          error: result.error ?? "Unknown error",
+        });
     }
   }
 
@@ -466,8 +545,14 @@ async function handleBulkApprove(
   if (!Array.isArray(p.issue_ids) || p.issue_ids.length === 0) {
     return { ok: false, error: "issue_ids is required" };
   }
-  const result = await processBulk(ctx, p.issue_ids, handleApprove, { comment: p.comment });
-  return { ok: true, review: result, message: `Released ${result.succeeded.length} review(s).` };
+  const result = await processBulk(ctx, p.issue_ids, handleApprove, {
+    comment: p.comment,
+  });
+  return {
+    ok: true,
+    review: result,
+    message: `Released ${result.succeeded.length} review(s).`,
+  };
 }
 
 async function handleBulkReject(
@@ -481,19 +566,45 @@ async function handleBulkReject(
   if (!p.comment?.trim()) {
     return { ok: false, error: "comment is required" };
   }
-  const result = await processBulk(ctx, p.issue_ids, handleReject, { comment: p.comment });
-  return { ok: true, review: result, message: `Requested revisions for ${result.succeeded.length} review(s).` };
+  const result = await processBulk(ctx, p.issue_ids, handleReject, {
+    comment: p.comment,
+  });
+  return {
+    ok: true,
+    review: result,
+    message: `Requested revisions for ${result.succeeded.length} review(s).`,
+  };
 }
 
 export function setupActions(ctx: PluginContext): void {
-  ctx.actions.register("quality_gate.submit", (params) => handleSubmit(ctx, params));
-  ctx.actions.register("quality_gate.approve", (params) => handleApprove(ctx, params));
-  ctx.actions.register("quality_gate.approve_hold", (params) => handleApproveHold(ctx, params));
-  ctx.actions.register("quality_gate.reject", (params) => handleReject(ctx, params));
-  ctx.actions.register("quality_gate.assign", (params) => handleAssign(ctx, params));
-  ctx.actions.register("quality_gate.return_to_agent", (params) => handleReturnToAgent(ctx, params));
-  ctx.actions.register("quality_gate.escalate", (params) => handleEscalate(ctx, params));
-  ctx.actions.register("quality_gate.generate_next_step", (params) => handleGenerateNextStep(ctx, params));
-  ctx.actions.register("quality_gate.bulk_approve", (params) => handleBulkApprove(ctx, params));
-  ctx.actions.register("quality_gate.bulk_reject", (params) => handleBulkReject(ctx, params));
+  ctx.actions.register("quality_gate.submit", (params) =>
+    handleSubmit(ctx, params),
+  );
+  ctx.actions.register("quality_gate.approve", (params) =>
+    handleApprove(ctx, params),
+  );
+  ctx.actions.register("quality_gate.approve_hold", (params) =>
+    handleApproveHold(ctx, params),
+  );
+  ctx.actions.register("quality_gate.reject", (params) =>
+    handleReject(ctx, params),
+  );
+  ctx.actions.register("quality_gate.assign", (params) =>
+    handleAssign(ctx, params),
+  );
+  ctx.actions.register("quality_gate.return_to_agent", (params) =>
+    handleReturnToAgent(ctx, params),
+  );
+  ctx.actions.register("quality_gate.escalate", (params) =>
+    handleEscalate(ctx, params),
+  );
+  ctx.actions.register("quality_gate.generate_next_step", (params) =>
+    handleGenerateNextStep(ctx, params),
+  );
+  ctx.actions.register("quality_gate.bulk_approve", (params) =>
+    handleBulkApprove(ctx, params),
+  );
+  ctx.actions.register("quality_gate.bulk_reject", (params) =>
+    handleBulkReject(ctx, params),
+  );
 }

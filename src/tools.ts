@@ -1,6 +1,16 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
-import { buildNextStepTemplate, buildSubmitComment, evaluateQuality } from "./helpers.js";
-import { getConfig, getIssueSnapshot, getReview, persistReviewArtifacts, putReview } from "./shared.js";
+import {
+  buildNextStepTemplate,
+  buildSubmitComment,
+  evaluateQuality,
+} from "./helpers.js";
+import {
+  getConfig,
+  getIssueSnapshot,
+  getReview,
+  persistReviewArtifacts,
+  putReview,
+} from "./shared.js";
 import { applyEvaluationToReview, buildNewReview } from "./helpers.js";
 
 async function handleQualityGateReview(
@@ -32,14 +42,18 @@ async function handleQualityGateReview(
     "",
     "### Risks",
     ...(review.riskFlags.length > 0
-      ? review.riskFlags.map((flag) => `- [${flag.level}] ${flag.label}: ${flag.detail}`)
+      ? review.riskFlags.map(
+          (flag) => `- [${flag.level}] ${flag.label}: ${flag.detail}`,
+        )
       : ["- No active risks flagged."]),
   ];
 
   if (p.include_checks) {
     lines.push("", "### Checks");
     for (const check of review.checks) {
-      lines.push(`- ${check.passed ? "✅" : "❌"} ${check.name} — ${check.details ?? ""} (score ${check.score})`);
+      lines.push(
+        `- ${check.passed ? "✅" : "❌"} ${check.name} — ${check.details ?? ""} (score ${check.score})`,
+      );
     }
     lines.push("", "### Trace");
     for (const step of review.evidenceBundle.trace) {
@@ -70,7 +84,12 @@ async function handleSubmitForReview(
   try {
     const config = await getConfig(ctx);
     const { companyId, issueData } = await getIssueSnapshot(ctx, p.issue_id);
-    const evaluation = evaluateQuality(p.quality_score, p.block_approval ?? false, config, issueData);
+    const evaluation = evaluateQuality(
+      p.quality_score,
+      p.block_approval ?? false,
+      config,
+      issueData,
+    );
     const existingReview = await getReview(ctx, p.issue_id);
     const review = existingReview
       ? applyEvaluationToReview(existingReview, {
@@ -111,17 +130,22 @@ async function handleSubmitForReview(
 
     if (review.companyId) {
       try {
-        await ctx.issues.createComment(review.issueId, buildSubmitComment(review), review.companyId);
+        await ctx.issues.createComment(
+          review.issueId,
+          buildSubmitComment(review),
+          review.companyId,
+        );
       } catch {
         // non-fatal
       }
     }
 
-    const emoji = review.status === "auto_rejected"
-      ? "⚠️"
-      : review.status === "needs_human_review"
-        ? "🛡️"
-        : "✅";
+    const emoji =
+      review.status === "auto_rejected"
+        ? "⚠️"
+        : review.status === "needs_human_review"
+          ? "🛡️"
+          : "✅";
 
     return {
       content: [
@@ -155,7 +179,11 @@ export function setupTools(ctx: PluginContext): void {
         type: "object",
         properties: {
           issue_id: { type: "string", description: "Paperclip issue ID." },
-          include_checks: { type: "boolean", description: "Include full checks and trace output.", default: false },
+          include_checks: {
+            type: "boolean",
+            description: "Include full checks and trace output.",
+            default: false,
+          },
         },
         required: ["issue_id"],
       },
@@ -173,9 +201,19 @@ export function setupTools(ctx: PluginContext): void {
         type: "object",
         properties: {
           issue_id: { type: "string", description: "Paperclip issue ID." },
-          summary: { type: "string", description: "Brief summary of the deliverable." },
-          quality_score: { type: "number", description: "Self-assessed quality score from 0–10." },
-          block_approval: { type: "boolean", description: "Force a human review hold.", default: false },
+          summary: {
+            type: "string",
+            description: "Brief summary of the deliverable.",
+          },
+          quality_score: {
+            type: "number",
+            description: "Self-assessed quality score from 0–10.",
+          },
+          block_approval: {
+            type: "boolean",
+            description: "Force a human review hold.",
+            default: false,
+          },
           comment: { type: "string", description: "Optional operator note." },
         },
         required: ["issue_id"],

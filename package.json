@@ -8,7 +8,7 @@
     "test": "tsx --test tests/**/*.test.ts",
     "plugin:typecheck": "tsc --noEmit",
     "plugin:lint": "eslint . --max-warnings 0",
-    "plugin:format": "prettier --check .",
+    "plugin:format": "bunx prettier --check .",
     "plugin:build": "node esbuild.config.mjs",
     "plugin:dev": "node esbuild.config.mjs --watch",
     "security:audit": "npm audit",

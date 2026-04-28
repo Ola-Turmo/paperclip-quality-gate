@@ -53,7 +53,8 @@ const manifest: PaperclipPluginManifestV1 = {
         maximum: 10,
         default: DEFAULT_CONFIG.minQualityScore,
         title: "Minimum Quality Score",
-        description: "Decision scores at or above this value are ready for reviewer approval.",
+        description:
+          "Decision scores at or above this value are ready for reviewer approval.",
       },
       blockThreshold: {
         type: "number",
@@ -61,7 +62,8 @@ const manifest: PaperclipPluginManifestV1 = {
         maximum: 10,
         default: DEFAULT_CONFIG.blockThreshold,
         title: "Human Review Threshold",
-        description: "Decision scores at or below this threshold stay in the human-review lane.",
+        description:
+          "Decision scores at or below this threshold stay in the human-review lane.",
       },
       autoRejectBelow: {
         type: "number",
@@ -69,13 +71,15 @@ const manifest: PaperclipPluginManifestV1 = {
         maximum: 10,
         default: DEFAULT_CONFIG.autoRejectBelow,
         title: "Auto-Reject Below",
-        description: "Decision scores below this threshold are returned for revision automatically.",
+        description:
+          "Decision scores below this threshold are returned for revision automatically.",
       },
       customChecks: {
         type: "array",
         default: [],
         title: "Structured Quality Checks",
-        description: "Safe, declarative rules evaluated against issue metadata. Passed checks can contribute bonus points to the decision score.",
+        description:
+          "Safe, declarative rules evaluated against issue metadata. Passed checks can contribute bonus points to the decision score.",
         items: {
           type: "object",
           required: ["id", "name", "type"],
@@ -84,13 +88,19 @@ const manifest: PaperclipPluginManifestV1 = {
             name: { type: "string", title: "Display Name" },
             type: {
               type: "string",
-              enum: ["label_required", "label_missing", "title_contains", "has_assignee"],
+              enum: [
+                "label_required",
+                "label_missing",
+                "title_contains",
+                "has_assignee",
+              ],
               title: "Check Type",
             },
             value: {
               type: "string",
               title: "Value",
-              description: "Label name or comma-separated keywords depending on check type.",
+              description:
+                "Label name or comma-separated keywords depending on check type.",
             },
             scoreBonus: {
               type: "number",
@@ -108,12 +118,18 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: "quality_gate_review",
       displayName: "Quality Gate — Review Package",
-      description: "Inspect the current review package for an issue, including release state, evidence hash, risks, and optional detailed checks/trace.",
+      description:
+        "Inspect the current review package for an issue, including release state, evidence hash, risks, and optional detailed checks/trace.",
       parametersSchema: {
         type: "object",
         properties: {
           issue_id: { type: "string", description: "Paperclip issue ID." },
-          include_checks: { type: "boolean", description: "Include detailed checks, trace, and next-step output.", default: false },
+          include_checks: {
+            type: "boolean",
+            description:
+              "Include detailed checks, trace, and next-step output.",
+            default: false,
+          },
         },
         required: ["issue_id"],
       },
@@ -121,15 +137,29 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: "submit_for_review",
       displayName: "Quality Gate — Submit Evidence Package",
-      description: "Create or refresh a deliverable review package and persist the evidence/next-step documents on the issue.",
+      description:
+        "Create or refresh a deliverable review package and persist the evidence/next-step documents on the issue.",
       parametersSchema: {
         type: "object",
         properties: {
           issue_id: { type: "string", description: "Paperclip issue ID." },
-          summary: { type: "string", description: "Summary of the completed work." },
-          quality_score: { type: "number", description: "Self-assessed quality score from 0–10." },
-          block_approval: { type: "boolean", description: "Force manual review regardless of score.", default: false },
-          comment: { type: "string", description: "Optional note for reviewers." },
+          summary: {
+            type: "string",
+            description: "Summary of the completed work.",
+          },
+          quality_score: {
+            type: "number",
+            description: "Self-assessed quality score from 0–10.",
+          },
+          block_approval: {
+            type: "boolean",
+            description: "Force manual review regardless of score.",
+            default: false,
+          },
+          comment: {
+            type: "string",
+            description: "Optional note for reviewers.",
+          },
         },
         required: ["issue_id"],
       },
