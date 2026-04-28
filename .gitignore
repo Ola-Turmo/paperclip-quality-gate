@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 deep-research-report*.md
 .omx/
+.omc/
