@@ -219,16 +219,16 @@ function evaluateCustomCheck(check: CustomCheck, issueData?: IssueMetadata): Qua
       const required = check.value ?? "";
       passed = labels.some((label) => label.toLowerCase() === required.toLowerCase());
       details = passed
-        ? `Required label \"${required}\" is present.`
-        : `Required label \"${required}\" is missing.`;
+        ? `Required label "${required}" is present.`
+        : `Required label "${required}" is missing.`;
       break;
     }
     case "label_missing": {
       const forbidden = check.value ?? "";
       passed = !labels.some((label) => label.toLowerCase() === forbidden.toLowerCase());
       details = passed
-        ? `Forbidden label \"${forbidden}\" is absent.`
-        : `Forbidden label \"${forbidden}\" is present.`;
+        ? `Forbidden label "${forbidden}" is absent.`
+        : `Forbidden label "${forbidden}" is present.`;
       break;
     }
     case "title_contains": {
@@ -305,7 +305,7 @@ export function evaluateQuality(
   const bonusPoints = customChecks.reduce((sum, check) => sum + (check.passed ? check.score : 0), 0);
   const decisionScore = clampScore(inputScore + bonusPoints);
 
-  let category: QualityCategory = "none";
+  let category: QualityCategory;
   let autoRejected = false;
   let blockThresholdBreached = false;
   let passed = false;

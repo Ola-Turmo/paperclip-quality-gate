@@ -1,4 +1,4 @@
-import { definePlugin, runWorker, type PluginContext, type Issue } from "@paperclipai/plugin-sdk";
+import { definePlugin, runWorker, type PluginContext } from "@paperclipai/plugin-sdk";
 import { PLUGIN_ID, PLUGIN_VERSION } from "./manifest.js";
 import type {
   AgentTrend,

@@ -7,6 +7,8 @@
   "scripts": {
     "test": "tsx --test tests/**/*.test.ts",
     "plugin:typecheck": "tsc --noEmit",
+    "plugin:lint": "eslint . --max-warnings 0",
+    "plugin:format": "prettier --check .",
     "plugin:build": "node esbuild.config.mjs",
     "plugin:dev": "node esbuild.config.mjs --watch",
     "security:audit": "npm audit",
@@ -19,13 +21,16 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@paperclipai/plugin-sdk": "^2026.416.0",
     "@paperclipai/shared": "^2026.416.0",
     "@types/node": "^22.19.17",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "esbuild": "^0.28.0",
+    "globals": "^17.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.59.1"
   }
 }

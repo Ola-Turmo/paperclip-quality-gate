@@ -7,6 +7,29 @@ on:
     branches: [main]
 
 jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: bun run plugin:format
+        name: Format check (prettier)
+
+      - run: bun run plugin:lint
+        name: Lint (eslint)
+
+      - run: bun run plugin:typecheck
+        name: TypeScript type check
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -21,11 +44,8 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run plugin:typecheck
-        name: TypeScript type check
-
-      - run: npm test
+      - run: bun test
         name: Tests (smoke + helpers)
 
-      - run: npm run plugin:build
+      - run: bun run plugin:build
         name: Build
