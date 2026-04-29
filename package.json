@@ -2,7 +2,6 @@
   "name": "uos-quality-gate",
   "version": "2.1.0",
   "description": "Evidence-centric Paperclip quality gate workbench with a reviewer queue, dashboard widget, auditable evidence bundles, and human-in-the-loop release controls.",
-  "private": true,
   "type": "module",
   "scripts": {
     "test": "tsx --test tests/**/*.test.ts",
