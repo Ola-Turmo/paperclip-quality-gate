@@ -1,453 +1,682 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UOS Quality Gate — Evidence-First Review for Autonomous AI Agents</title>
-  <meta name="description" content="UOS Quality Gate turns every autonomous agent deliverable into a reviewer-ready evidence bundle with draft artifact, risk flags, decision score, and full reviewer cockpit inside Paperclip." />
-  <style>
-    :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --accent: #2f81f7;
-      --accent-hover: #58a6ff;
-      --green: #3fb950;
-      --amber: #d29922;
-      --red: #f85149;
-      --radius: 8px;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-hover); text-decoration: underline; }
-    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
-    header {
-      border-bottom: 1px solid var(--border);
-      padding: 20px 0;
-    }
-    header .container {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .logo { font-size: 18px; font-weight: 700; color: var(--text); }
-    .logo span { color: var(--accent); }
-    .badge {
-      background: rgba(47,129,247,0.15);
-      color: var(--accent);
-      border: 1px solid rgba(47,129,247,0.3);
-      font-size: 12px;
-      padding: 3px 10px;
-      border-radius: 20px;
-    }
-    .hero {
-      padding: 80px 0 60px;
-      text-align: center;
-    }
-    .hero h1 {
-      font-size: 42px;
-      font-weight: 800;
-      line-height: 1.2;
-      margin-bottom: 20px;
-      letter-spacing: -0.02em;
-    }
-    .hero h1 em {
-      font-style: normal;
-      color: var(--accent);
-    }
-    .hero p {
-      font-size: 18px;
-      color: var(--muted);
-      max-width: 600px;
-      margin: 0 auto 36px;
-    }
-    .cta-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .btn {
-      display: inline-block;
-      padding: 12px 28px;
-      border-radius: var(--radius);
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .btn-primary {
-      background: var(--accent);
-      color: #fff;
-      border: 1px solid var(--accent);
-    }
-    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); text-decoration: none; }
-    .btn-secondary {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover { border-color: var(--muted); text-decoration: none; }
-    .proof {
-      margin-top: 48px;
-      display: flex;
-      gap: 32px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .proof-item { text-align: center; }
-    .proof-item .num { font-size: 28px; font-weight: 800; color: var(--green); }
-    .proof-item .label { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .divider { border: none; border-top: 1px solid var(--border); margin: 60px 0; }
-    section { padding: 60px 0; }
-    section h2 {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 16px;
-    }
-    section p { color: var(--muted); margin-bottom: 32px; }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 20px;
-    }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 24px;
-    }
-    .card .icon {
-      font-size: 28px;
-      margin-bottom: 12px;
-    }
-    .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
-    .card p { font-size: 14px; color: var(--muted); margin: 0; }
-    .problem-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      margin-top: 8px;
-    }
-    .problem-col { padding: 28px; }
-    .problem-col.before { background: rgba(248,81,73,0.08); border-right: 1px solid var(--border); }
-    .problem-col.after { background: rgba(63,185,80,0.08); }
-    .problem-col h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px; }
-    .before .problem-col h4 { color: var(--red); }
-    .after .problem-col h4 { color: var(--green); }
-    .problem-col ul { list-style: none; font-size: 14px; }
-    .problem-col ul li { padding: 6px 0; display: flex; gap: 8px; }
-    .before ul li::before { content: '✗'; color: var(--red); }
-    .after ul li::before { content: '✓'; color: var(--green); }
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 20px;
-      margin-top: 8px;
-    }
-    .price-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px;
-    }
-    .price-card.featured {
-      border-color: var(--accent);
-      position: relative;
-    }
-    .price-card.featured::before {
-      content: 'Most Popular';
-      position: absolute;
-      top: -12px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--accent);
-      color: #fff;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 12px;
-      border-radius: 20px;
-    }
-    .price-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
-    .price-card .price { font-size: 32px; font-weight: 800; margin-bottom: 4px; }
-    .price-card .price span { font-size: 14px; font-weight: 400; color: var(--muted); }
-    .price-card .desc { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
-    .price-card ul { list-style: none; font-size: 13px; }
-    .price-card ul li { padding: 5px 0; }
-    .price-card ul li::before { content: '✓ '; color: var(--green); }
-    .reviewer-img {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px;
-      margin-top: 8px;
-    }
-    .reviewer-img p { font-size: 16px; color: var(--text); margin-bottom: 20px; font-style: italic; }
-    .reviewer-img .meta { font-size: 13px; color: var(--muted); }
-    .social-proof {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-top: 32px;
-    }
-    .social-proof-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 20px;
-      font-size: 13px;
-      color: var(--muted);
-      flex: 1;
-      min-width: 180px;
-    }
-    .social-proof-item strong { color: var(--text); display: block; margin-bottom: 4px; }
-    .faq-item {
-      border-bottom: 1px solid var(--border);
-      padding: 20px 0;
-    }
-    .faq-item h4 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
-    .faq-item p { font-size: 14px; color: var(--muted); margin: 0; }
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 0;
-      text-align: center;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    footer p { margin-bottom: 8px; }
-    @media (max-width: 600px) {
-      .hero h1 { font-size: 28px; }
-      .problem-grid { grid-template-columns: 1fr; }
-    }
-  </style>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      UOS Quality Gate — Evidence-First Review for Autonomous AI Agents
+    </title>
+    <meta
+      name="description"
+      content="UOS Quality Gate turns every autonomous agent deliverable into a reviewer-ready evidence bundle with draft artifact, risk flags, decision score, and full reviewer cockpit inside Paperclip."
+    />
+    <style>
+      :root {
+        --bg: #0d1117;
+        --surface: #161b22;
+        --border: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #2f81f7;
+        --accent-hover: #58a6ff;
+        --green: #3fb950;
+        --amber: #d29922;
+        --red: #f85149;
+        --radius: 8px;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        color: var(--accent-hover);
+        text-decoration: underline;
+      }
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      header {
+        border-bottom: 1px solid var(--border);
+        padding: 20px 0;
+      }
+      header .container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .logo {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .logo span {
+        color: var(--accent);
+      }
+      .badge {
+        background: rgba(47, 129, 247, 0.15);
+        color: var(--accent);
+        border: 1px solid rgba(47, 129, 247, 0.3);
+        font-size: 12px;
+        padding: 3px 10px;
+        border-radius: 20px;
+      }
+      .hero {
+        padding: 80px 0 60px;
+        text-align: center;
+      }
+      .hero h1 {
+        font-size: 42px;
+        font-weight: 800;
+        line-height: 1.2;
+        margin-bottom: 20px;
+        letter-spacing: -0.02em;
+      }
+      .hero h1 em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .hero p {
+        font-size: 18px;
+        color: var(--muted);
+        max-width: 600px;
+        margin: 0 auto 36px;
+      }
+      .cta-group {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .btn {
+        display: inline-block;
+        padding: 12px 28px;
+        border-radius: var(--radius);
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border: 1px solid var(--accent);
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+        text-decoration: none;
+      }
+      .btn-secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        border-color: var(--muted);
+        text-decoration: none;
+      }
+      .proof {
+        margin-top: 48px;
+        display: flex;
+        gap: 32px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .proof-item {
+        text-align: center;
+      }
+      .proof-item .num {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--green);
+      }
+      .proof-item .label {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 60px 0;
+      }
+      section {
+        padding: 60px 0;
+      }
+      section h2 {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 16px;
+      }
+      section p {
+        color: var(--muted);
+        margin-bottom: 32px;
+      }
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 20px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+      }
+      .card .icon {
+        font-size: 28px;
+        margin-bottom: 12px;
+      }
+      .card h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .card p {
+        font-size: 14px;
+        color: var(--muted);
+        margin: 0;
+      }
+      .problem-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      .problem-col {
+        padding: 28px;
+      }
+      .problem-col.before {
+        background: rgba(248, 81, 73, 0.08);
+        border-right: 1px solid var(--border);
+      }
+      .problem-col.after {
+        background: rgba(63, 185, 80, 0.08);
+      }
+      .problem-col h4 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 16px;
+      }
+      .before .problem-col h4 {
+        color: var(--red);
+      }
+      .after .problem-col h4 {
+        color: var(--green);
+      }
+      .problem-col ul {
+        list-style: none;
+        font-size: 14px;
+      }
+      .problem-col ul li {
+        padding: 6px 0;
+        display: flex;
+        gap: 8px;
+      }
+      .before ul li::before {
+        content: "✗";
+        color: var(--red);
+      }
+      .after ul li::before {
+        content: "✓";
+        color: var(--green);
+      }
+      .pricing-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-top: 8px;
+      }
+      .price-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 28px;
+      }
+      .price-card.featured {
+        border-color: var(--accent);
+        position: relative;
+      }
+      .price-card.featured::before {
+        content: "Most Popular";
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--accent);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 12px;
+        border-radius: 20px;
+      }
+      .price-card h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .price-card .price {
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+      .price-card .price span {
+        font-size: 14px;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .price-card .desc {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 20px;
+      }
+      .price-card ul {
+        list-style: none;
+        font-size: 13px;
+      }
+      .price-card ul li {
+        padding: 5px 0;
+      }
+      .price-card ul li::before {
+        content: "✓ ";
+        color: var(--green);
+      }
+      .reviewer-img {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 28px;
+        margin-top: 8px;
+      }
+      .reviewer-img p {
+        font-size: 16px;
+        color: var(--text);
+        margin-bottom: 20px;
+        font-style: italic;
+      }
+      .reviewer-img .meta {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .social-proof {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-top: 32px;
+      }
+      .social-proof-item {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+        font-size: 13px;
+        color: var(--muted);
+        flex: 1;
+        min-width: 180px;
+      }
+      .social-proof-item strong {
+        color: var(--text);
+        display: block;
+        margin-bottom: 4px;
+      }
+      .faq-item {
+        border-bottom: 1px solid var(--border);
+        padding: 20px 0;
+      }
+      .faq-item h4 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .faq-item p {
+        font-size: 14px;
+        color: var(--muted);
+        margin: 0;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+        padding: 40px 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      footer p {
+        margin-bottom: 8px;
+      }
+      @media (max-width: 600px) {
+        .hero h1 {
+          font-size: 28px;
+        }
+        .problem-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <div class="logo">UOS <span>Quality Gate</span></div>
+        <span class="badge">v2.1.0 — Paperclip Plugin</span>
+      </div>
+    </header>
 
-<header>
-  <div class="container">
-    <div class="logo">UOS <span>Quality Gate</span></div>
-    <span class="badge">v2.1.0 — Paperclip Plugin</span>
-  </div>
-</header>
+    <section class="hero">
+      <div class="container">
+        <h1>Every agent deliverable.<br /><em>Reviewer-ready.</em></h1>
+        <p>
+          UOS Quality Gate turns every autonomous AI agent submission into a
+          complete evidence package — draft artifact, risk flags, decision
+          score, and full release controls — directly inside Paperclip. No more
+          guessing why something was approved.
+        </p>
+        <div class="cta-group">
+          <a
+            href="https://github.com/Ola-Turmo/paperclip-quality-gate"
+            class="btn btn-primary"
+            >View on GitHub</a
+          >
+          <a
+            href="https://github.com/Ola-Turmo/paperclip-quality-gate#readme"
+            class="btn btn-secondary"
+            >Read the Docs</a
+          >
+        </div>
+        <div class="proof">
+          <div class="proof-item">
+            <div class="num">5</div>
+            <div class="label">Review actions</div>
+          </div>
+          <div class="proof-item">
+            <div class="num">v2.1.0</div>
+            <div class="label">Latest release</div>
+          </div>
+          <div class="proof-item">
+            <div class="num">Paperclip</div>
+            <div class="label">Native plugin</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-<section class="hero">
-  <div class="container">
-    <h1>Every agent deliverable.<br/><em>Reviewer-ready.</em></h1>
-    <p>UOS Quality Gate turns every autonomous AI agent submission into a complete evidence package — draft artifact, risk flags, decision score, and full release controls — directly inside Paperclip. No more guessing why something was approved.</p>
-    <div class="cta-group">
-      <a href="https://github.com/Ola-Turmo/paperclip-quality-gate" class="btn btn-primary">View on GitHub</a>
-      <a href="https://github.com/Ola-Turmo/paperclip-quality-gate#readme" class="btn btn-secondary">Read the Docs</a>
+    <div class="container">
+      <hr class="divider" />
+
+      <section>
+        <h2>The problem with autonomous delivery</h2>
+        <p>
+          Autonomous agents move fast. The last mile still breaks on trust. UOS
+          Quality Gate fixes that by making every agent output auditable before
+          it ships.
+        </p>
+        <div class="problem-grid">
+          <div class="problem-col before">
+            <h4>Without Quality Gate</h4>
+            <ul>
+              <li>Reviewers can't see why a draft was marked "done"</li>
+              <li>Evidence scattered across comments, logs, chat</li>
+              <li>Release decisions impossible to reconstruct</li>
+              <li>No structured way to return work to an agent</li>
+              <li>Score-only gating hides the reasoning</li>
+            </ul>
+          </div>
+          <div class="problem-col after">
+            <h4>With UOS Quality Gate</h4>
+            <ul>
+              <li>Complete evidence bundle per submission</li>
+              <li>Risk flags surfaced before approval</li>
+              <li>Full audit trail linked to the Paperclip issue</li>
+              <li>
+                Five reviewer actions: approve, hold, revise, return, escalate
+              </li>
+              <li>Decision score + risk context + next-step brief</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section>
+        <h2>What you get</h2>
+        <div class="grid-3">
+          <div class="card">
+            <div class="icon">📦</div>
+            <h3>Evidence Package</h3>
+            <p>
+              Every review stores triggering source, input refs, quality checks,
+              risk flags, evidence hash, and next-step guidance in one
+              structured bundle.
+            </p>
+          </div>
+          <div class="card">
+            <div class="icon">🎛️</div>
+            <h3>Reviewer Cockpit</h3>
+            <p>
+              Operators approve, hold, request revision, return work to the
+              responsible agent, or escalate — with full context and no
+              guesswork.
+            </p>
+          </div>
+          <div class="card">
+            <div class="icon">📊</div>
+            <h3>Company Dashboard</h3>
+            <p>
+              Queue pressure, review holds, released work, and high-risk
+              packages summarized for leads to triage decisions fast.
+            </p>
+          </div>
+          <div class="card">
+            <div class="icon">🔗</div>
+            <h3>Paperclip-Native</h3>
+            <p>
+              Built around the Paperclip plugin SDK — events, issue comments,
+              documents, plugin state, telemetry, and detail-tab UI all
+              integrated.
+            </p>
+          </div>
+          <div class="card">
+            <div class="icon">🔒</div>
+            <h3>Audit Trail</h3>
+            <p>
+              Every release decision is persisted and linked to the Paperclip
+              issue. Downstream teams can reconstruct what happened and why.
+            </p>
+          </div>
+          <div class="card">
+            <div class="icon">⚡</div>
+            <h3>5 Reviewer Actions</h3>
+            <p>
+              Approve &amp; release · Approve &amp; hold · Request revision ·
+              Return to agent · Escalate. Not a pass/fail gate — a full
+              workbench.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section>
+        <h2>The review surface your team will actually use</h2>
+        <div class="reviewer-img">
+          <p>
+            "Every submission shows me the draft artifact, what risk flags
+            fired, what the agent was trying to do, and exactly what I should do
+            next. I no longer have to reconstruct the reasoning — it's all
+            there."
+          </p>
+          <div class="meta">
+            — Platform Lead, AI Operations team (internal beta)
+          </div>
+        </div>
+        <div class="social-proof">
+          <div class="social-proof-item">
+            <strong>No more ad hoc chat</strong>
+            Evidence and decisions live on the Paperclip issue, not in DMs
+          </div>
+          <div class="social-proof-item">
+            <strong>Risk-aware releases</strong>
+            Flags surface before approval, not after something ships
+          </div>
+          <div class="social-proof-item">
+            <strong>Agent improvement loop</strong>
+            Structured return-to-agent path closes the feedback cycle
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section>
+        <h2>Simple pricing</h2>
+        <div class="pricing-grid">
+          <div class="price-card">
+            <h3>Community</h3>
+            <div class="price">Free</div>
+            <div class="desc">For small teams getting started</div>
+            <ul>
+              <li>1 company</li>
+              <li>50 reviews / month</li>
+              <li>1 reviewer</li>
+              <li>Basic evidence bundle</li>
+            </ul>
+          </div>
+          <div class="price-card featured">
+            <h3>Pro</h3>
+            <div class="price">$99<span>/mo</span></div>
+            <div class="desc">For growing AI operations teams</div>
+            <ul>
+              <li>Unlimited reviews</li>
+              <li>5 reviewers</li>
+              <li>Dashboard + trends</li>
+              <li>Full reviewer cockpit</li>
+              <li>Audit trail</li>
+              <li>Priority support</li>
+            </ul>
+          </div>
+          <div class="price-card">
+            <h3>Enterprise</h3>
+            <div class="price">Custom</div>
+            <div class="desc">For organizations at scale</div>
+            <ul>
+              <li>Unlimited everything</li>
+              <li>SLA guarantee</li>
+              <li>Custom integrations</li>
+              <li>Dedicated support</li>
+              <li>On-premise available</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section>
+        <h2>Frequently asked</h2>
+        <div class="faq-item">
+          <h4>How is this different from a simple CI score gate?</h4>
+          <p>
+            Most quality gates give you a pass/fail score. UOS Quality Gate
+            gives you the full evidence package, risk flags, decision score, and
+            a reviewer workbench — so humans can make informed release decisions
+            instead of trusting an opaque number.
+          </p>
+        </div>
+        <div class="faq-item">
+          <h4>Does it work with any Paperclip setup?</h4>
+          <p>
+            Yes. UOS Quality Gate is a Paperclip plugin. Install it on any
+            company running Paperclip and it hooks into the issue lifecycle,
+            events, and comments via the official plugin SDK.
+          </p>
+        </div>
+        <div class="faq-item">
+          <h4>What if a reviewer approves something that breaks?</h4>
+          <p>
+            The full audit trail is persisted on the Paperclip issue — who
+            reviewed it, what evidence was presented, what risk flags fired, and
+            what the agent's next-step brief said. You can reconstruct the full
+            decision context at any time.
+          </p>
+        </div>
+        <div class="faq-item">
+          <h4>Can I return work directly to the agent?</h4>
+          <p>
+            Yes. The reviewer cockpit has a "return to agent" action that sends
+            the deliverable back with a structured brief of what needs to change
+            — closing the agent improvement loop.
+          </p>
+        </div>
+        <div class="faq-item">
+          <h4>How do I get started?</h4>
+          <p>
+            Install the plugin, configure your reviewer team in Paperclip
+            settings, and every future agent deliverable will automatically
+            produce an evidence bundle for review. No workflow changes required
+            on the agent side.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section style="text-align: center; padding-bottom: 80px">
+        <h2>Ready to make your agent output auditable?</h2>
+        <p style="max-width: 500px; margin: 0 auto 32px">
+          Join teams using UOS Quality Gate to ship autonomous work with full
+          reviewer context and audit trails.
+        </p>
+        <div class="cta-group" style="margin-bottom: 32px">
+          <a
+            href="https://github.com/Ola-Turmo/paperclip-quality-gate"
+            class="btn btn-primary"
+            >Install from GitHub</a
+          >
+          <a
+            href="https://github.com/Ola-Turmo/paperclip-quality-gate/issues"
+            class="btn btn-secondary"
+            >Talk to the Team</a
+          >
+        </div>
+        <p style="font-size: 13px; color: var(--muted)">
+          Built by
+          <a href="https://parallel-company.ai">Parallel Company AI</a> ·
+          <a href="https://github.com/Ola-Turmo/paperclip-quality-gate"
+            >GitHub</a
+          >
+          · <a href="https://parallel-company.ai/privacy">Privacy</a>
+        </p>
+      </section>
     </div>
-    <div class="proof">
-      <div class="proof-item">
-        <div class="num">5</div>
-        <div class="label">Review actions</div>
-      </div>
-      <div class="proof-item">
-        <div class="num">v2.1.0</div>
-        <div class="label">Latest release</div>
-      </div>
-      <div class="proof-item">
-        <div class="num">Paperclip</div>
-        <div class="label">Native plugin</div>
-      </div>
-    </div>
-  </div>
-</section>
 
-<div class="container">
-  <hr class="divider" />
-
-  <section>
-    <h2>The problem with autonomous delivery</h2>
-    <p>Autonomous agents move fast. The last mile still breaks on trust. UOS Quality Gate fixes that by making every agent output auditable before it ships.</p>
-    <div class="problem-grid">
-      <div class="problem-col before">
-        <h4>Without Quality Gate</h4>
-        <ul>
-          <li>Reviewers can't see why a draft was marked "done"</li>
-          <li>Evidence scattered across comments, logs, chat</li>
-          <li>Release decisions impossible to reconstruct</li>
-          <li>No structured way to return work to an agent</li>
-          <li>Score-only gating hides the reasoning</li>
-        </ul>
+    <footer>
+      <div class="container">
+        <p>
+          &copy; 2026 Parallel Company AI. UOS Quality Gate is an open-source
+          Paperclip plugin.
+        </p>
+        <p>v2.1.0 · Paperclip Plugin SDK · MIT-compatible license</p>
       </div>
-      <div class="problem-col after">
-        <h4>With UOS Quality Gate</h4>
-        <ul>
-          <li>Complete evidence bundle per submission</li>
-          <li>Risk flags surfaced before approval</li>
-          <li>Full audit trail linked to the Paperclip issue</li>
-          <li>Five reviewer actions: approve, hold, revise, return, escalate</li>
-          <li>Decision score + risk context + next-step brief</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider" />
-
-  <section>
-    <h2>What you get</h2>
-    <div class="grid-3">
-      <div class="card">
-        <div class="icon">📦</div>
-        <h3>Evidence Package</h3>
-        <p>Every review stores triggering source, input refs, quality checks, risk flags, evidence hash, and next-step guidance in one structured bundle.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🎛️</div>
-        <h3>Reviewer Cockpit</h3>
-        <p>Operators approve, hold, request revision, return work to the responsible agent, or escalate — with full context and no guesswork.</p>
-      </div>
-      <div class="card">
-        <div class="icon">📊</div>
-        <h3>Company Dashboard</h3>
-        <p>Queue pressure, review holds, released work, and high-risk packages summarized for leads to triage decisions fast.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🔗</div>
-        <h3>Paperclip-Native</h3>
-        <p>Built around the Paperclip plugin SDK — events, issue comments, documents, plugin state, telemetry, and detail-tab UI all integrated.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🔒</div>
-        <h3>Audit Trail</h3>
-        <p>Every release decision is persisted and linked to the Paperclip issue. Downstream teams can reconstruct what happened and why.</p>
-      </div>
-      <div class="card">
-        <div class="icon">⚡</div>
-        <h3>5 Reviewer Actions</h3>
-        <p>Approve &amp; release · Approve &amp; hold · Request revision · Return to agent · Escalate. Not a pass/fail gate — a full workbench.</p>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider" />
-
-  <section>
-    <h2>The review surface your team will actually use</h2>
-    <div class="reviewer-img">
-      <p>"Every submission shows me the draft artifact, what risk flags fired, what the agent was trying to do, and exactly what I should do next. I no longer have to reconstruct the reasoning — it's all there."</p>
-      <div class="meta">— Platform Lead, AI Operations team (internal beta)</div>
-    </div>
-    <div class="social-proof">
-      <div class="social-proof-item">
-        <strong>No more ad hoc chat</strong>
-        Evidence and decisions live on the Paperclip issue, not in DMs
-      </div>
-      <div class="social-proof-item">
-        <strong>Risk-aware releases</strong>
-        Flags surface before approval, not after something ships
-      </div>
-      <div class="social-proof-item">
-        <strong>Agent improvement loop</strong>
-        Structured return-to-agent path closes the feedback cycle
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider" />
-
-  <section>
-    <h2>Simple pricing</h2>
-    <div class="pricing-grid">
-      <div class="price-card">
-        <h3>Community</h3>
-        <div class="price">Free</div>
-        <div class="desc">For small teams getting started</div>
-        <ul>
-          <li>1 company</li>
-          <li>50 reviews / month</li>
-          <li>1 reviewer</li>
-          <li>Basic evidence bundle</li>
-        </ul>
-      </div>
-      <div class="price-card featured">
-        <h3>Pro</h3>
-        <div class="price">$99<span>/mo</span></div>
-        <div class="desc">For growing AI operations teams</div>
-        <ul>
-          <li>Unlimited reviews</li>
-          <li>5 reviewers</li>
-          <li>Dashboard + trends</li>
-          <li>Full reviewer cockpit</li>
-          <li>Audit trail</li>
-          <li>Priority support</li>
-        </ul>
-      </div>
-      <div class="price-card">
-        <h3>Enterprise</h3>
-        <div class="price">Custom</div>
-        <div class="desc">For organizations at scale</div>
-        <ul>
-          <li>Unlimited everything</li>
-          <li>SLA guarantee</li>
-          <li>Custom integrations</li>
-          <li>Dedicated support</li>
-          <li>On-premise available</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider" />
-
-  <section>
-    <h2>Frequently asked</h2>
-    <div class="faq-item">
-      <h4>How is this different from a simple CI score gate?</h4>
-      <p>Most quality gates give you a pass/fail score. UOS Quality Gate gives you the full evidence package, risk flags, decision score, and a reviewer workbench — so humans can make informed release decisions instead of trusting an opaque number.</p>
-    </div>
-    <div class="faq-item">
-      <h4>Does it work with any Paperclip setup?</h4>
-      <p>Yes. UOS Quality Gate is a Paperclip plugin. Install it on any company running Paperclip and it hooks into the issue lifecycle, events, and comments via the official plugin SDK.</p>
-    </div>
-    <div class="faq-item">
-      <h4>What if a reviewer approves something that breaks?</h4>
-      <p>The full audit trail is persisted on the Paperclip issue — who reviewed it, what evidence was presented, what risk flags fired, and what the agent's next-step brief said. You can reconstruct the full decision context at any time.</p>
-    </div>
-    <div class="faq-item">
-      <h4>Can I return work directly to the agent?</h4>
-      <p>Yes. The reviewer cockpit has a "return to agent" action that sends the deliverable back with a structured brief of what needs to change — closing the agent improvement loop.</p>
-    </div>
-    <div class="faq-item">
-      <h4>How do I get started?</h4>
-      <p>Install the plugin, configure your reviewer team in Paperclip settings, and every future agent deliverable will automatically produce an evidence bundle for review. No workflow changes required on the agent side.</p>
-    </div>
-  </section>
-
-  <hr class="divider" />
-
-  <section style="text-align:center; padding-bottom:80px;">
-    <h2>Ready to make your agent output auditable?</h2>
-    <p style="max-width:500px; margin:0 auto 32px;">Join teams using UOS Quality Gate to ship autonomous work with full reviewer context and audit trails.</p>
-    <div class="cta-group" style="margin-bottom:32px;">
-      <a href="https://github.com/Ola-Turmo/paperclip-quality-gate" class="btn btn-primary">Install from GitHub</a>
-      <a href="https://github.com/Ola-Turmo/paperclip-quality-gate/issues" class="btn btn-secondary">Talk to the Team</a>
-    </div>
-    <p style="font-size:13px; color:var(--muted);">Built by <a href="https://parallel-company.ai">Parallel Company AI</a> · <a href="https://github.com/Ola-Turmo/paperclip-quality-gate">GitHub</a> · <a href="https://parallel-company.ai/privacy">Privacy</a></p>
-  </section>
-
-</div>
-
-<footer>
-  <div class="container">
-    <p>&copy; 2026 Parallel Company AI. UOS Quality Gate is an open-source Paperclip plugin.</p>
-    <p>v2.1.0 · Paperclip Plugin SDK · MIT-compatible license</p>
-  </div>
-</footer>
-
-</body>
+    </footer>
+  </body>
 </html>

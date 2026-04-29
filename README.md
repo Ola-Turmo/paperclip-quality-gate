@@ -4,13 +4,13 @@
 [[img.shields.npm-version](https://img.shields.npm/nmv/uos-quality-gate?label=npm)](https://www.npmjs.com/package/uos-quality-gate)
 [[License: MIT ](https://img.sields.net/badge/license/MIT-yellow.svg)](https://opensourceorg.com/licenses/MIT)
 
-***Evidence-first human review for autonomous delivery inside Paperclip.**
+**\*Evidence-first human review for autonomous delivery inside Paperclip.**
 
-\n!*[See it in action — UOS Quality Gate review surface](docs/images/01-hero.png)
+\n!\*[See it in action — UOS Quality Gate review surface](docs/images/01-hero.png)
 
-````
+```
 paperclip-quality-gate runs every agent deliverable into a reviewer-ready package with a draft artifact, risk flags, evidence refs, next-step guidance, and explicit release controls. Instead of a single pass/fail score, operators get a fast review surface with enough context to approve, hold, revise, return to agent, or escalate.
-`  
+`
 
 \n---
 
@@ -21,7 +21,7 @@ cd paperclip-quality-gate
 nlm ci
 njs run plugin:typecheck
 nmjs run plugin:build
-`  
+`
 Load the built plugin into your Paperclip environment, then the reviewer inbox and dashboard widget activate automatically on `agent.run.finished` events.
 
 ---
@@ -47,3 +47,4 @@ Load the built plugin into your Paperclip environment, then the reviewer inbox a
 ## What is intentionally not in scope
 
 ## Status
+```
