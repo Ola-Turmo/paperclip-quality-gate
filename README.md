@@ -56,28 +56,31 @@ The reviewer sees exactly what changed, what's risky, and what the agent's own s
 Three steps from agent output to reviewer decision.
 
 ### 1. Agent finishes work
+
 The agent marks its Paperclip issue done. Quality Gate intercepts the signal and runs the full check suite: format, lint, typecheck, tests.
 
 ### 2. Evidence bundle generated
+
 A structured bundle is produced: diff summary, risk flags, decision score, check results, and links to changed files — all in one view.
 
 ### 3. Reviewer decides
+
 The reviewer opens the cockpit — approve, hold, reject, return, or escalate. Decision is logged back to the Paperclip issue for audit.
 
 ---
 
 ## Key capabilities in v2.1
 
-| Capability | Description |
-|---|---|
-| **Evidence bundle** | Every review is a self-contained package with draft, risk flags, and decision score |
-| **Reviewer cockpit** | Approve / Hold / Reject / Return to agent / Escalate — all linked to Paperclip issue |
-| **Paperclip issue linkage** | Evidence bundle is attached to the originating Paperclip issue for full audit trail |
-| **Risk flags** | Automated detection of what could go wrong in the deliverable |
-| **Decision score** | Numeric self-assessment (0–10) surfaces the agent's own confidence level |
-| **CI/CD integration** | GitHub Actions pass/fail is captured in the evidence bundle |
-| ** bun fmt · lint · typecheck** | All three enforced — evidence of clean output is part of the bundle |
-| **Multi-agent ready** | Works with any number of concurrent agents; review queue scales with your team |
+| Capability                      | Description                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| **Evidence bundle**             | Every review is a self-contained package with draft, risk flags, and decision score  |
+| **Reviewer cockpit**            | Approve / Hold / Reject / Return to agent / Escalate — all linked to Paperclip issue |
+| **Paperclip issue linkage**     | Evidence bundle is attached to the originating Paperclip issue for full audit trail  |
+| **Risk flags**                  | Automated detection of what could go wrong in the deliverable                        |
+| **Decision score**              | Numeric self-assessment (0–10) surfaces the agent's own confidence level             |
+| **CI/CD integration**           | GitHub Actions pass/fail is captured in the evidence bundle                          |
+| ** bun fmt · lint · typecheck** | All three enforced — evidence of clean output is part of the bundle                  |
+| **Multi-agent ready**           | Works with any number of concurrent agents; review queue scales with your team       |
 
 ---
 
@@ -101,15 +104,15 @@ agent.run.finished
 
 Each evidence bundle contains:
 
-| Field | Description |
-|---|---|
-| `decisionScore` | Agent self-assessment (0–10) |
-| `riskFlags[]` | Array of detected risk indicators |
-| `checks{}` | Results of bun fmt, bun lint, bun typecheck, tests |
-| `changedFiles[]` | List of files modified in this deliverable |
-| `draftArtifact` | The deliverable summary or diff |
-| `paperclipIssueId` | Link back to the originating issue |
-| `timestamp` | When the bundle was generated |
+| Field              | Description                                        |
+| ------------------ | -------------------------------------------------- |
+| `decisionScore`    | Agent self-assessment (0–10)                       |
+| `riskFlags[]`      | Array of detected risk indicators                  |
+| `checks{}`         | Results of bun fmt, bun lint, bun typecheck, tests |
+| `changedFiles[]`   | List of files modified in this deliverable         |
+| `draftArtifact`    | The deliverable summary or diff                    |
+| `paperclipIssueId` | Link back to the originating issue                 |
+| `timestamp`        | When the bundle was generated                      |
 
 ---
 
@@ -117,7 +120,7 @@ Each evidence bundle contains:
 
 ```typescript
 // The plugin listens for this Paperclip event:
-ctx.events.on('agent.run.finished', async (event) => {
+ctx.events.on("agent.run.finished", async (event) => {
   const bundle = await generateEvidenceBundle(event);
   await ctx.issues.update(event.issueId, { evidence: bundle });
   await ctx.cockpit.show(bundle);
@@ -152,6 +155,7 @@ Paperclip (control plane)
 ```
 
 Key files:
+
 - `src/index.ts` — Plugin entry point, event wiring
 - `src/checks.ts` — Check suite (fmt, lint, typecheck, tests)
 - `src/score.ts` — Decision score computation
@@ -184,6 +188,7 @@ bun run ci
 ```
 
 ### Prerequisites
+
 - Node.js 20+
 - [Bun](https://bun.sh) runtime
 - A Paperclip environment with the plugin loaded
@@ -195,6 +200,7 @@ bun run ci
 UOS Quality Gate is **not** a score gate. It does not block agent output or force rejection based on a threshold. The decision always stays with the human reviewer.
 
 It also does not:
+
 - Replace CI/CD pipelines (it consumes their results)
 - Run tests itself — it captures test outcomes from the agent's run
 - Provide a standalone dashboard outside of Paperclip
@@ -204,16 +210,16 @@ It also does not:
 
 ## Status
 
-| Item | Status |
-|---|---|
-| CI/CD | Passing |
-| Core plugin | Stable (v2.1.0) |
-| npm package | Published |
-| GitHub Actions integration | Working |
-| Paperclip plugin SDK | v2.1.0 compatible |
-| Reviewer cockpit | Active on `agent.run.finished` |
-| Community tier | Free (1 company, 50 reviews/mo) |
-| Pro tier | $99/mo — in development |
+| Item                       | Status                          |
+| -------------------------- | ------------------------------- |
+| CI/CD                      | Passing                         |
+| Core plugin                | Stable (v2.1.0)                 |
+| npm package                | Published                       |
+| GitHub Actions integration | Working                         |
+| Paperclip plugin SDK       | v2.1.0 compatible               |
+| Reviewer cockpit           | Active on `agent.run.finished`  |
+| Community tier             | Free (1 company, 50 reviews/mo) |
+| Pro tier                   | $99/mo — in development         |
 
 ### Live adoption
 
@@ -225,10 +231,10 @@ It also does not:
 
 ## Pricing
 
-| Plan | Price | Includes |
-|---|---|---|
-| **Community** | Free | 1 company · 50 reviews/mo · 1 reviewer · Basic evidence bundle · GitHub Actions integration |
-| **Pro** | $99/mo | Unlimited reviews · 5 reviewers · Dashboard + trends · Full evidence bundle · Priority support |
+| Plan           | Price  | Includes                                                                                          |
+| -------------- | ------ | ------------------------------------------------------------------------------------------------- |
+| **Community**  | Free   | 1 company · 50 reviews/mo · 1 reviewer · Basic evidence bundle · GitHub Actions integration       |
+| **Pro**        | $99/mo | Unlimited reviews · 5 reviewers · Dashboard + trends · Full evidence bundle · Priority support    |
 | **Enterprise** | Custom | Unlimited everything · SLA guarantee · Custom integrations · Audit log export · Dedicated support |
 
 Start free on [GitHub](https://github.com/Ola-Turmo/paperclip-quality-gate) or install via [npm](https://www.npmjs.com/package/uos-quality-gate).
