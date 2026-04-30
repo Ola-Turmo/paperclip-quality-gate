@@ -1,6 +1,6 @@
 # UOS Quality Gate
 
-[![CI](https://github-com-Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml.svg?branch=main)](https://github.com/Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml)
+[![CI](https://github.com/Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/uos-quality-gate?label=npm)](https://www.npmjs.com/package/uos-quality-gate)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
