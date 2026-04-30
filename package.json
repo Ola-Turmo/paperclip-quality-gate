@@ -1,5 +1,5 @@
 {
-  "name": "uos-quality-gate",
+  "name": "@Ola-Turmo/uos-quality-gate",
   "version": "2.1.0",
   "description": "Evidence-centric Paperclip quality gate workbench with a reviewer queue, dashboard widget, auditable evidence bundles, and human-in-the-loop release controls.",
   "type": "module",

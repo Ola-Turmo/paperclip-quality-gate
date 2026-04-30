@@ -1,7 +1,7 @@
 # UOS Quality Gate
 
 [![CI](https://github.com/Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ola-Turmo/paperclip-quality-gate/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/uos-quality-gate?label=npm)](https://www.npmjs.com/package/uos-quality-gate)
+[![npm version](https://img.shields.io/npm/v/@Ola-Turmo/uos-quality-gate?label=npm)](https://github.com/Ola-Turmo/paperclip-quality-gate/pkgs/npm/uos-quality-gate)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Evidence-first human review for autonomous delivery inside Paperclip.**
@@ -237,10 +237,10 @@ It also does not:
 | **Pro**        | $99/mo | Unlimited reviews · 5 reviewers · Dashboard + trends · Full evidence bundle · Priority support    |
 | **Enterprise** | Custom | Unlimited everything · SLA guarantee · Custom integrations · Audit log export · Dedicated support |
 
-Start free on [GitHub](https://github.com/Ola-Turmo/paperclip-quality-gate) or install via [npm](https://www.npmjs.com/package/uos-quality-gate).
+Start free on [GitHub](https://github.com/Ola-Turmo/paperclip-quality-gate) or install via [npm](https://github.com/Ola-Turmo/paperclip-quality-gate/pkgs/npm/uos-quality-gate) (`npm install @Ola-Turmo/uos-quality-gate`).
 
 ---
 
 Built by **Parallel Company AI** · Part of the UOS plugin ecosystem
 
-GitHub: [Ola-Turmo/paperclip-quality-gate](https://github.com/Ola-Turmo/paperclip-quality-gate) · npm: [uos-quality-gate](https://www.npmjs.com/package/uos-quality-gate)
+GitHub: [Ola-Turmo/paperclip-quality-gate](https://github.com/Ola-Turmo/paperclip-quality-gate) · npm: [@Ola-Turmo/uos-quality-gate](https://github.com/Ola-Turmo/paperclip-quality-gate/pkgs/npm/uos-quality-gate)
