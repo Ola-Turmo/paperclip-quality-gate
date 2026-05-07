@@ -25,6 +25,7 @@ import {
   persistReviewArtifacts,
   putReview,
 } from "./shared.js";
+import { STATE_KEYS } from "./helpers.js";
 
 async function postIssueComment(
   ctx: PluginContext,
@@ -42,6 +43,95 @@ async function postIssueComment(
   }
 }
 
+function getRunIndexKey(runId: string) {
+  return {
+    scopeKind: "run" as const,
+    scopeId: runId,
+    stateKey: STATE_KEYS.RUN_INDEX,
+  };
+}
+
+async function findIssueIdForRun(
+  ctx: PluginContext,
+  runId: string,
+  companyId: string,
+): Promise<string | null> {
+  // 1. Try the run-scoped index first (written by agent.run.started).
+  try {
+    const indexed = await ctx.state.get(getRunIndexKey(runId));
+    if (typeof indexed === "string" && indexed) {
+      return indexed;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Fallback: scan recent issues for run linkage.
+  // Paperclip may clear executionRunId/checkoutRunId when a run finishes,
+  // so the index is the primary source. originRunId is an additional
+  // fallback field that persists on some issues.
+  try {
+    const issues = await ctx.issues.list({ companyId, limit: 100 });
+    const matched = issues.find((issue) => {
+      const record = issue as unknown as {
+        executionRunId?: string | null;
+        checkoutRunId?: string | null;
+        originRunId?: string | null;
+      };
+      return (
+        record.executionRunId === runId ||
+        record.checkoutRunId === runId ||
+        record.originRunId === runId
+      );
+    });
+    if (matched?.id) {
+      return matched.id;
+    }
+  } catch (error) {
+    ctx.logger.warn("agent.run.finished: failed to list issues", {
+      error: String(error),
+    });
+  }
+
+  return null;
+}
+
+async function handleAgentRunStarted(
+  event: PluginEvent,
+  ctx: PluginContext,
+): Promise<void> {
+  const runId = event.entityId ?? "";
+  const companyId = event.companyId ?? "";
+
+  if (!runId || !companyId) return;
+
+  try {
+    const issues = await ctx.issues.list({ companyId, limit: 100 });
+    const matched = issues.find((issue) => {
+      const record = issue as unknown as {
+        executionRunId?: string | null;
+        checkoutRunId?: string | null;
+      };
+      return record.executionRunId === runId || record.checkoutRunId === runId;
+    });
+
+    const issueId = matched?.id ?? "";
+    if (issueId) {
+      await ctx.state.set(getRunIndexKey(runId), issueId);
+      ctx.logger.info("agent.run.started: indexed run to issue", {
+        runId,
+        issueId,
+        companyId,
+      });
+    }
+  } catch (error) {
+    ctx.logger.warn("agent.run.started: failed to index run", {
+      runId,
+      error: String(error),
+    });
+  }
+}
+
 async function handleAgentRunFinished(
   event: PluginEvent,
   ctx: PluginContext,
@@ -54,31 +144,35 @@ async function handleAgentRunFinished(
     return;
   }
 
-  let issueId = "";
-  try {
-    const issues = await ctx.issues.list({ companyId, limit: 50 });
-    const matched = issues.find((issue) => {
-      const record = issue as unknown as {
-        executionRunId?: string;
-        checkoutRunId?: string;
-      };
-      return record.executionRunId === runId || record.checkoutRunId === runId;
-    });
-    issueId = matched?.id ?? "";
-  } catch (error) {
-    ctx.logger.warn("agent.run.finished: failed to list issues", {
-      error: String(error),
-    });
+  const issueId = await findIssueIdForRun(ctx, runId, companyId);
+  if (!issueId) {
+    ctx.logger.warn("agent.run.finished: no issue found for run", { runId });
+    return;
   }
 
-  if (!issueId) return;
+  // Clean up the run index now that we have resolved the issue.
+  try {
+    await ctx.state.delete(getRunIndexKey(runId));
+  } catch {
+    // best-effort cleanup
+  }
 
   try {
     const config = await getConfig(ctx);
     const { issueData } = await getIssueSnapshot(ctx, issueId, companyId);
+
+    // Defensive extraction: Paperclip may not send plugin-specific fields.
+    const qualityScore =
+      typeof payload.qualityScore === "number"
+        ? payload.qualityScore
+        : undefined;
+    const blockApproval = payload.blockApproval === true;
+    const summary = payload.summary;
+    const agentId = payload.agentId ?? event.actorId ?? undefined;
+
     const evaluation = evaluateQuality(
-      payload.qualityScore,
-      payload.blockApproval ?? false,
+      qualityScore,
+      blockApproval,
       config,
       issueData,
     );
@@ -86,37 +180,37 @@ async function handleAgentRunFinished(
 
     const review = existingReview
       ? applyEvaluationToReview(existingReview, {
-          summary: payload.summary,
+          summary,
           evaluation,
           reviewerName: "Agent",
-          agentId: payload.agentId,
+          agentId,
           issueData,
-          blockApproval: payload.blockApproval,
+          blockApproval,
           trigger: {
             source: "agent_run_finished",
-            actorLabel: payload.agentId || "Agent",
-            agentId: payload.agentId,
+            actorLabel: agentId || "Agent",
+            agentId,
             runId,
-            summary: payload.summary,
+            summary,
             createdAt: new Date().toISOString(),
           },
         })
       : buildNewReview({
           issueId,
           companyId,
-          summary: payload.summary,
-          qualityScore: payload.qualityScore,
-          blockApproval: payload.blockApproval,
+          summary,
+          qualityScore,
+          blockApproval,
           reviewerName: "Agent",
-          agentId: payload.agentId,
+          agentId,
           issueData,
           evaluation,
           trigger: {
             source: "agent_run_finished",
-            actorLabel: payload.agentId || "Agent",
-            agentId: payload.agentId,
+            actorLabel: agentId || "Agent",
+            agentId,
             runId,
-            summary: payload.summary,
+            summary,
             createdAt: new Date().toISOString(),
           },
         });
@@ -184,11 +278,21 @@ async function handleAgentRunFailed(
   event: PluginEvent,
   ctx: PluginContext,
 ): Promise<void> {
+  const runId = event.entityId ?? "";
   ctx.logger.info("agent.run.failed observed", {
-    runId: event.entityId,
+    runId,
     companyId: event.companyId,
     payload: event.payload,
   });
+
+  // Clean up any stale run index.
+  if (runId) {
+    try {
+      await ctx.state.delete(getRunIndexKey(runId));
+    } catch {
+      // best-effort cleanup
+    }
+  }
 }
 
 /**
@@ -271,12 +375,7 @@ async function handleIssueUpdated(
 
     // Evaluate with a null qualityScore since there was no agent run
     const qualityScore: number | undefined = undefined;
-    const evaluation = evaluateQuality(
-      qualityScore,
-      false,
-      config,
-      issueData,
-    );
+    const evaluation = evaluateQuality(qualityScore, false, config, issueData);
 
     const review = buildNewReview({
       issueId,
@@ -300,20 +399,18 @@ async function handleIssueUpdated(
 
     await putReview(ctx, review);
     await persistReviewArtifacts(ctx, review);
-    await postIssueComment(
-      ctx,
-      issueId,
-      companyId,
-      buildSubmitComment(review),
-    );
+    await postIssueComment(ctx, issueId, companyId, buildSubmitComment(review));
 
     ctx.streams.emit("quality_gate.review_created", { review });
-    ctx.logger.info("issue.updated: auto-created review for manual completion", {
-      issueId,
-      reviewId: review.id,
-      previousStatus,
-      newStatus,
-    });
+    ctx.logger.info(
+      "issue.updated: auto-created review for manual completion",
+      {
+        issueId,
+        reviewId: review.id,
+        previousStatus,
+        newStatus,
+      },
+    );
   } catch (error) {
     ctx.logger.warn("issue.updated: failed to auto-create review", {
       issueId,
@@ -323,6 +420,9 @@ async function handleIssueUpdated(
 }
 
 export function setupEvents(ctx: PluginContext): void {
+  ctx.events.on("agent.run.started", (event) =>
+    handleAgentRunStarted(event, ctx),
+  );
   ctx.events.on("agent.run.finished", (event) =>
     handleAgentRunFinished(event, ctx),
   );

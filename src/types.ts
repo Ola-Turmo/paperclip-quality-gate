@@ -264,8 +264,8 @@ export interface IssueUpdatedEvent {
 }
 
 export interface AgentRunFinishedEvent {
-  agentId: string;
-  status: "completed" | "failed" | "cancelled";
+  agentId?: string;
+  status?: "completed" | "failed" | "cancelled";
   summary?: string;
   qualityScore?: number;
   blockApproval?: boolean;

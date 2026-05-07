@@ -25,6 +25,7 @@ import type {
 export const STATE_KEYS = {
   REVIEWS: "reviews",
   REVIEW_IDS: "review_ids",
+  RUN_INDEX: "quality_gate_run_index",
 } as const;
 
 const MAX_HISTORY_ENTRIES = 50;
