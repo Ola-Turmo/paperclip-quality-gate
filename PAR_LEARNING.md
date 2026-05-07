@@ -50,3 +50,26 @@ Paperclip run-scoped auth (X-Paperclip-Run-Id header) fails for ALL write operat
 - PUT /api/companies/.../memory/... → 401
   This is a systematic Paperclip issue; reads work, writes don't with this auth method.
   Workaround: push status files to GitHub repo for next agent to read.
+
+## 2026-05-07: Agent.run.finished Auto-Trigger Gap Fixed
+
+### Problem
+The `agent.run.finished` event handler often failed to create a review because:
+1. `executionRunId`/`checkoutRunId` on the Issue may be cleared before/during the event
+2. The handler assumed Paperclip sent plugin-specific payload fields (`qualityScore`, `summary`, `blockApproval`, `agentId`) which are not guaranteed
+
+### Solution
+- Added `agent.run.started` handler to index `runId → issueId` in run-scoped plugin state
+- Added `findIssueIdForRun` helper: checks run index first, then falls back to scanning issues by `executionRunId`, `checkoutRunId`, and `originRunId`
+- Made `handleAgentRunFinished` defensive: safely extract optional payload fields, fallback to `event.actorId` for `agentId`
+- Clean up run index after `agent.run.finished` and `agent.run.failed`
+
+### Evidence
+- Commit: `b593139` on `main`
+- Files changed: `src/events.ts`, `src/helpers.ts`, `src/types.ts`, `tests/events.test.ts`
+- Tests: 19 pass (8 suites), typecheck + lint + format clean
+- GitHub: https://github.com/Ola-Turmo/paperclip-quality-gate/commit/b593139
+
+### Next Steps
+- Monitor Paperclip plugin logs after next deployment to confirm reviews auto-create on agent runs
+- Consider adding `agent.run.cancelled` handler for completeness
