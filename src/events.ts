@@ -191,6 +191,15 @@ async function handleAgentRunFailed(
   });
 }
 
+/**
+ * Trigger sources for the quality gate review.
+ * Used to understand how a review was initiated.
+ */
+export type ReviewTriggerSource =
+  | "agent_run_finished"
+  | "issue_status_change"
+  | "manual_submit";
+
 async function handleIssueCreated(
   event: PluginEvent,
   ctx: PluginContext,
@@ -209,12 +218,108 @@ async function handleIssueUpdated(
 ): Promise<void> {
   const payload = event.payload as IssueUpdatedEvent;
   const issue = payload?.issue;
+  const newStatus = issue?.status ?? null;
+  const previousStatus = payload.previousStatus ?? null;
+
   ctx.logger.info("issue.updated observed", {
     companyId: event.companyId,
     issueId: issue?.id ?? event.entityId ?? null,
-    status: issue?.status ?? null,
-    previousStatus: payload.previousStatus,
+    status: newStatus,
+    previousStatus,
   });
+
+  // Auto-create a review when an issue is marked done without an agent run.
+  // The agent.run.finished handler covers automated completions;
+  // this handler catches manual / external completions.
+  const DONE_STATUSES = new Set(["done", "completed", "approved"]);
+  if (
+    !newStatus ||
+    !DONE_STATUSES.has(newStatus) ||
+    previousStatus === newStatus
+  ) {
+    return;
+  }
+
+  const issueId = issue?.id ?? event.entityId ?? "";
+  const companyId = event.companyId ?? "";
+
+  if (!issueId || !companyId) return;
+
+  // Only handle issues that transitioned *to* a done state from a non-done state.
+  // If it was already done, this is not a completion transition.
+  if (previousStatus && DONE_STATUSES.has(previousStatus)) {
+    ctx.logger.info("issue.updated: skipping — already in a done state", {
+      issueId,
+      previousStatus,
+      newStatus,
+    });
+    return;
+  }
+
+  try {
+    const existingReview = await getReview(ctx, issueId);
+    if (existingReview) {
+      ctx.logger.info(
+        "issue.updated: review already exists for issue, skipping",
+        { issueId, reviewId: existingReview.id },
+      );
+      return;
+    }
+
+    const config = await getConfig(ctx);
+    const { issueData } = await getIssueSnapshot(ctx, issueId, companyId);
+
+    // Evaluate with a null qualityScore since there was no agent run
+    const qualityScore: number | undefined = undefined;
+    const evaluation = evaluateQuality(
+      qualityScore,
+      false,
+      config,
+      issueData,
+    );
+
+    const review = buildNewReview({
+      issueId,
+      companyId,
+      summary: issueData.description ?? issueData.title,
+      qualityScore,
+      blockApproval: false,
+      reviewerName: "System",
+      agentId: undefined,
+      issueData,
+      evaluation,
+      trigger: {
+        source: "issue_status_change",
+        actorLabel: "Manual completion",
+        agentId: undefined,
+        runId: undefined,
+        summary: `Issue marked ${newStatus} manually — no agent run recorded`,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    await putReview(ctx, review);
+    await persistReviewArtifacts(ctx, review);
+    await postIssueComment(
+      ctx,
+      issueId,
+      companyId,
+      buildSubmitComment(review),
+    );
+
+    ctx.streams.emit("quality_gate.review_created", { review });
+    ctx.logger.info("issue.updated: auto-created review for manual completion", {
+      issueId,
+      reviewId: review.id,
+      previousStatus,
+      newStatus,
+    });
+  } catch (error) {
+    ctx.logger.warn("issue.updated: failed to auto-create review", {
+      issueId,
+      error: String(error),
+    });
+  }
 }
 
 export function setupEvents(ctx: PluginContext): void {

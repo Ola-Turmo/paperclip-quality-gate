@@ -92,7 +92,8 @@ export interface ReviewTrigger {
     | "manual_submit"
     | "agent_run_finished"
     | "tool_submit"
-    | "resubmission";
+    | "resubmission"
+    | "issue_status_change";
   actorLabel: string;
   agentId?: string;
   runId?: string;
